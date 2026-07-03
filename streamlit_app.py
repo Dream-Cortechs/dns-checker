@@ -52,7 +52,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    :root { --bg: #070d16; --surface: #0d1a2d; --border: #152540; --accent: #c9a94e; --text: #cdd6e4; --muted: #6b7d95; }
+    :root { --bg: #070d16; --surface: #0d1a2d; --border: #152540; --accent: #c9a94e; --text: #e2e8f0; --muted: #94a3b8; }
     .stApp { background: var(--bg); }
     
     /* ===== HEADER ===== */
@@ -376,7 +376,8 @@ with tab1:
             for rt in ["a", "aaaa", "mx", "txt", "ns", "soa"]:
                 recs = lookup.get(rt)
                 if recs:
-                    st.caption(f"**{rt.upper()}** — {', '.join(str(r)[:60] for r in recs[:3])}")
+                    val = ", ".join(str(r)[:60] for r in recs[:3])
+                    st.markdown(f'<div style="color:#e2e8f0;font-family:Consolas,monospace;font-size:0.85rem;padding:2px 0;"><span style="color:#c9a94e;font-weight:700;">{rt.upper()}</span> — {val}</div>', unsafe_allow_html=True)
         
         # Quick email
         if email:
@@ -386,7 +387,7 @@ with tab1:
             icons.append("✅" if spf["has_spf"] else "❌")
             icons.append("✅" if dkim["has_dkim"] else "❌")
             icons.append("✅" if dmarc["has_dmarc"] else "❌")
-            st.caption(f"SPF {icons[0]} · DKIM {icons[1]} · DMARC {icons[2]}  —  Score {score}/4")
+            st.markdown(f'<div style="color:#e2e8f0;font-size:0.9rem;">SPF {icons[0]} · DKIM {icons[1]} · DMARC {icons[2]}  —  <span style="color:#c9a94e;font-weight:700;">Score {score}/4</span></div>', unsafe_allow_html=True)
         
         if st.session_state.results_bl:
             bl = st.session_state.results_bl
