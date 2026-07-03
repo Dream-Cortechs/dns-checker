@@ -1,0 +1,439 @@
+"""
+DNS CHECKER — Report Generator (fpdf2)
+Génère un rapport PDF complet de diagnostic DNS
+Cortechs © 2026
+"""
+
+import io
+import concurrent.futures
+from datetime import datetime
+from fpdf import FPDF
+
+from dns_engine import DNSEngine, GLOBAL_RESOLVERS, DNS_BLACKLISTS, RECORD_TYPES
+
+# ─── Fonts ───────────────────────────────────────────────────────────────────
+
+try:
+    FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    # Verify existence
+    with open(FONT_REGULAR): pass
+except:
+    FONT_REGULAR = FONT_BOLD = FONT_MONO = None
+
+# ─── Colors (print-friendly) ─────────────────────────────────────────────────
+
+GOLD      = (170, 130, 40)
+DARK_BG   = (10, 22, 40)
+DARK_TEXT  = (25, 30, 45)
+GRAY_TEXT  = (80, 85, 95)
+GREEN      = (25, 130, 50)
+RED        = (180, 30, 40)
+YELLOW     = (180, 140, 0)
+BLUE       = (40, 80, 160)
+WHITE      = (255, 255, 255)
+
+
+class DNSReport(FPDF):
+    """Génère un rapport PDF de diagnostic DNS complet."""
+
+    def __init__(self, domain: str, results: dict):
+        super().__init__("P", "mm", "A4")
+        self.domain = domain
+        self.results = results  # {lookup, propagation, email, blacklist}
+        self._has_fonts = FONT_REGULAR is not None
+        
+        if self._has_fonts:
+            self.add_font("DejaVu", "", FONT_REGULAR, uni=True)
+            self.add_font("DejaVu", "B", FONT_BOLD, uni=True)
+            self.add_font("DejaVuMono", "", FONT_MONO, uni=True)
+            self.font_name = "DejaVu"
+            self.font_mono = "DejaVuMono"
+        else:
+            self.font_name = "Helvetica"
+            self.font_mono = "Courier"
+        
+        self.set_auto_page_break(True, 20)
+        self._sanitize_results()
+
+    def _sanitize_results(self):
+        """Strip emojis from results for PDF compat."""
+        self.results_str = self._clean_dict(self.results)
+
+    def _clean_dict(self, d):
+        if isinstance(d, dict):
+            return {self._clean_str(k): self._clean_dict(v) for k, v in d.items()}
+        elif isinstance(d, list):
+            return [self._clean_dict(i) for i in d]
+        elif isinstance(d, str):
+            return self._clean_str(d)
+        return d
+
+    def _clean_str(self, s):
+        if not isinstance(s, str):
+            return s
+        # Remove emojis and flags
+        import re
+        s = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u0400-\u04FF]+', '', s)
+        return s
+
+    def _section(self, title: str):
+        self.set_fill_color(25, 35, 55)
+        self.set_text_color(*GOLD)
+        self.set_font(self.font_name, "B", 12)
+        self.cell(0, 8, f"  {title}", new_x="LMARGIN", new_y="NEXT", fill=True)
+        self.set_text_color(*DARK_TEXT)
+        self.ln(3)
+
+    def _kv(self, label: str, value: str, w_label: int = 35):
+        self.set_font(self.font_name, "B", 9)
+        self.set_text_color(*GRAY_TEXT)
+        self.cell(w_label, 5, label + ":")
+        self.set_font(self.font_name, "", 9)
+        self.set_text_color(*DARK_TEXT)
+        self.cell(0, 5, str(value)[:80], new_x="LMARGIN", new_y="NEXT")
+
+    def _badge(self, text: str, color: tuple):
+        self.set_fill_color(*color)
+        self.set_text_color(*WHITE)
+        self.set_font(self.font_name, "B", 7)
+        self.cell(25, 5, text, fill=True, border=0)
+        self.set_text_color(*DARK_TEXT)
+
+    def _table(self, headers: list, rows: list, col_widths: list = None):
+        if not rows: return
+        if not col_widths:
+            col_widths = [190 // len(headers)] * len(headers)
+        
+        # Header
+        self.set_fill_color(30, 40, 60)
+        self.set_text_color(*GOLD)
+        self.set_font(self.font_name, "B", 7)
+        for i, h in enumerate(headers):
+            self.cell(col_widths[i], 5, h, fill=True)
+        self.ln()
+        
+        # Rows
+        for i, row in enumerate(rows):
+            if i % 2 == 0:
+                self.set_fill_color(240, 242, 245)
+            else:
+                self.set_fill_color(255, 255, 255)
+            self.set_text_color(*DARK_TEXT)
+            self.set_font(self.font_mono if self.font_mono == "DejaVuMono" else self.font_name, "", 7)
+            for j, cell in enumerate(row):
+                self.cell(col_widths[j], 4.5, str(cell)[:50], fill=True)
+            self.ln()
+        self.ln(2)
+
+    # ─── Pages ───────────────────────────────────────────────────────────
+
+    def cover_page(self):
+        self.add_page()
+        # Background
+        self.set_fill_color(*DARK_BG)
+        self.rect(0, 0, 210, 75, "F")
+        
+        # Gold bar
+        self.set_fill_color(*GOLD)
+        self.rect(0, 75, 210, 3, "F")
+        
+        self.set_y(20)
+        self.set_text_color(*GOLD)
+        self.set_font(self.font_name, "B", 26)
+        self.cell(0, 10, "DNS CHECKER", align="C", new_x="LMARGIN", new_y="NEXT")
+        
+        self.set_text_color(180, 190, 210)
+        self.set_font(self.font_name, "", 12)
+        self.cell(0, 7, "Rapport de diagnostic DNS", align="C", new_x="LMARGIN", new_y="NEXT")
+        
+        self.ln(10)
+        self.set_text_color(*GOLD)
+        self.set_font(self.font_name, "B", 18)
+        self.cell(0, 8, self.domain, align="C", new_x="LMARGIN", new_y="NEXT")
+        
+        self.ln(12)
+        self.set_text_color(*GRAY_TEXT)
+        self.set_font(self.font_name, "", 10)
+        
+        now = datetime.now().strftime("%d/%m/%Y  %H:%M")
+        self.cell(0, 6, f"Généré le {now}", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 6, "Cortechs © 2026  |  dns-checker v2.0", align="C", new_x="LMARGIN", new_y="NEXT")
+        
+        # Summary chips
+        self.ln(10)
+        lookup = self.results.get("lookup", {})
+        email = self.results.get("email", {})
+        bl = self.results.get("blacklist", {})
+        prop = self.results.get("propagation", {})
+        
+        chips = []
+        if lookup.get("a"):
+            chips.append(f"A: {lookup['a'][0][:30]}" if isinstance(lookup["a"], list) and lookup["a"] else "")
+        if email.get("score"):
+            chips.append(f"Score: {email['score']}/4")
+        if bl.get("listed"):
+            chips.append(f"Blacklists: {bl['listed']}/{bl.get('total',12)}")
+        if prop.get("success"):
+            chips.append(f"Propagation: {prop['success']}/{prop.get('total',24)}")
+        
+        for chip in [c for c in chips if c]:
+            self.set_text_color(*GRAY_TEXT)
+            self.set_font(self.font_name, "", 9)
+            self.cell(0, 5, chip, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    def dns_lookup_page(self):
+        self.add_page()
+        lookup = self.results.get("lookup", {})
+        
+        self._section("Enregistrements DNS")
+        
+        for rtype in ["A", "AAAA", "MX", "CNAME", "TXT", "NS", "SOA"]:
+            records = lookup.get(rtype.lower())
+            if records:
+                self.set_font(self.font_name, "B", 10)
+                self.set_text_color(*GOLD)
+                self.cell(0, 6, f"  {rtype} ({len(records)})", new_x="LMARGIN", new_y="NEXT")
+                
+                for i, rec in enumerate(records, 1):
+                    self.set_font(self.font_mono if self.font_mono == "DejaVuMono" else self.font_name, "", 8)
+                    self.set_text_color(*DARK_TEXT)
+                    display = str(rec)[:100]
+                    self.cell(0, 5, f"    {i}. {display}", new_x="LMARGIN", new_y="NEXT")
+                self.ln(2)
+
+    def propagation_page(self):
+        prop = self.results.get("propagation", {})
+        if not prop:
+            return
+        
+        self.add_page()
+        self._section("Propagation DNS mondiale")
+        
+        self.ln(2)
+        success = prop.get("success", 0)
+        total = prop.get("total", 24)
+        consensus = prop.get("consensus", "N/A")
+        consensus_pct = prop.get("consensus_pct", 0)
+        
+        self._kv("Résolveurs OK", f"{success}/{total}")
+        self._kv("Consensus", f"{consensus_pct:.0f}%")
+        self._kv("Valeur majoritaire", str(consensus)[:50])
+        self.ln(4)
+        
+        # Table
+        headers = ["Résolveur", "IP", "Résultat", "Statut"]
+        rows = []
+        for item in prop.get("details", []):
+            status_icon = "OK" if item.get("ok") else "FAIL" if item.get("error") else "EMPTY"
+            result = item.get("result", "")[:40]
+            rows.append([item.get("name", ""), item.get("ip", ""), result, status_icon])
+        
+        self._table(headers, rows, [55, 35, 70, 25])
+
+    def email_security_page(self):
+        email = self.results.get("email", {})
+        if not email:
+            return
+        
+        self.add_page()
+        self._section("Securite Email")
+        
+        self.ln(2)
+        score = email.get("score", 0)
+        color = GREEN if score >= 4 else YELLOW if score >= 2 else RED
+        self.set_font(self.font_name, "B", 14)
+        self.set_text_color(*color)
+        self.cell(0, 8, f"Score: {score}/4", new_x="LMARGIN", new_y="NEXT")
+        self.ln(4)
+        self.set_text_color(*DARK_TEXT)
+        
+        # MX
+        mx = email.get("mx", {})
+        self.set_font(self.font_name, "B", 10)
+        self.set_text_color(*GOLD)
+        self.cell(0, 6, "MX — Serveurs Mail", new_x="LMARGIN", new_y="NEXT")
+        for server in mx.get("servers", []):
+            self.set_font(self.font_name, "", 9)
+            self.set_text_color(*DARK_TEXT)
+            self.cell(0, 5, f"  {server}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
+        
+        # SPF
+        spf = email.get("spf", {})
+        self.set_font(self.font_name, "B", 10)
+        self.set_text_color(*GOLD)
+        status = "Present" if spf.get("present") else "Absent"
+        self.cell(0, 6, f"SPF — {status}  ({spf.get('mechanism', '')})", new_x="LMARGIN", new_y="NEXT")
+        for rec in spf.get("records", [])[:3]:
+            self.set_font(self.font_mono if self.font_mono == "DejaVuMono" else self.font_name, "", 7)
+            self.set_text_color(*DARK_TEXT)
+            self.cell(0, 4.5, f"  {rec[:120]}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
+        
+        # DKIM
+        dkim = email.get("dkim", {})
+        self.set_font(self.font_name, "B", 10)
+        self.set_text_color(*GOLD)
+        dk_status = f"Present (selector: {dkim.get('selector','')})" if dkim.get("present") else "Absent"
+        self.cell(0, 6, f"DKIM — {dk_status}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
+        
+        # DMARC
+        dmarc = email.get("dmarc", {})
+        self.set_font(self.font_name, "B", 10)
+        self.set_text_color(*GOLD)
+        dm_status = dmarc.get("policy", "Absent") if dmarc.get("present") else "Absent"
+        self.cell(0, 6, f"DMARC — {dm_status}", new_x="LMARGIN", new_y="NEXT")
+
+    def blacklist_page(self):
+        bl = self.results.get("blacklist", {})
+        if not bl:
+            return
+        
+        self.add_page()
+        self._section("Verification Blacklists DNS")
+        
+        self.ln(2)
+        ip = bl.get("ip", "")
+        self._kv("IP testee", ip)
+        listed = bl.get("listed", 0)
+        total = bl.get("total", 12)
+        color = GREEN if listed == 0 else RED
+        self.set_font(self.font_name, "B", 11)
+        self.set_text_color(*color)
+        self.cell(0, 7, f"{listed}/{total} blacklists", new_x="LMARGIN", new_y="NEXT")
+        self.ln(4)
+        self.set_text_color(*DARK_TEXT)
+        
+        headers = ["Blacklist", "Statut"]
+        rows = []
+        for item in bl.get("details", []):
+            rows.append([item.get("name", ""), item.get("status", "")])
+        
+        self._table(headers, rows, [80, 100])
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font(self.font_name, "", 7)
+        self.set_text_color(*GRAY_TEXT)
+        self.cell(0, 5, f"DNS CHECKER v2.0  |  Cortechs (c) 2026  |  {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Page {self.page_no()}/{{nb}}", align="C")
+
+    def build(self) -> bytes:
+        self.cover_page()
+        
+        if self.results.get("lookup"):
+            self.dns_lookup_page()
+        if self.results.get("propagation"):
+            self.propagation_page()
+        if self.results.get("email"):
+            self.email_security_page()
+        if self.results.get("blacklist"):
+            self.blacklist_page()
+        
+        return bytes(self.output())
+
+
+def run_full_report(domain: str, ip: str = None) -> dict:
+    """Run all DNS checks for a domain and return structured results."""
+    results = {"domain": domain}
+    
+    # ─── DNS Lookup ───
+    lookup = {}
+    for rtype in ["A", "AAAA", "MX", "CNAME", "TXT", "NS", "SOA"]:
+        r = DNSEngine.query(domain, rtype)
+        if r["records"]:
+            lookup[rtype.lower()] = r["records"]
+    results["lookup"] = lookup
+    
+    # ─── Propagation ───
+    prop_details = []
+    success = 0
+    consensus = {}
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(DNSEngine.query, domain, "A", ip, 6): (name, ip_addr) 
+                   for name, ip_addr in GLOBAL_RESOLVERS.items()}
+        for future in concurrent.futures.as_completed(futures):
+            name, ip_addr = futures[future]
+            try: r = future.result(timeout=6)
+            except: r = {"records": [], "error": "Exception"}
+            ok = r["error"] is None and bool(r["records"])
+            if ok:
+                success += 1
+                val = r["records"][0]
+                consensus[val] = consensus.get(val, 0) + 1
+            prop_details.append({
+                "name": name, "ip": ip_addr,
+                "result": r["records"][0] if r["records"] else (r.get("error") or "?"),
+                "ok": ok, "error": r.get("error")
+            })
+    
+    most_common = max(consensus, key=consensus.get, default="N/A")
+    results["propagation"] = {
+        "total": len(GLOBAL_RESOLVERS),
+        "success": success,
+        "consensus": most_common,
+        "consensus_pct": (consensus.get(most_common, 0) / len(GLOBAL_RESOLVERS) * 100) if consensus else 0,
+        "details": sorted(prop_details, key=lambda x: (not x["ok"], x["name"]))
+    }
+    
+    # ─── Email Security ───
+    mx = DNSEngine.query_mx(domain)
+    spf = DNSEngine.check_spf(domain)
+    dkim = DNSEngine.check_dkim(domain, "default")
+    dmarc = DNSEngine.check_dmarc(domain)
+    
+    score = 0
+    if mx["mx_records"]: score += 1
+    if spf["has_spf"] and spf["all_mechanism"]: score += 1
+    if dkim["has_dkim"]: score += 1
+    if dmarc["has_dmarc"] and ("reject" in dmarc["policy"].lower() or "quarantine" in dmarc["policy"].lower()):
+        score += 1
+    
+    results["email"] = {
+        "score": score,
+        "mx": {"servers": [f"P{p} {h}" for p, h in mx["mx_records"][:10]]},
+        "spf": {
+            "present": spf["has_spf"],
+            "records": spf["spf_records"],
+            "mechanism": "Hard Fail (-all)" if spf["all_mechanism"] else "Soft Fail (~all)" if spf["soft_all"] else "None"
+        },
+        "dkim": {"present": dkim["has_dkim"], "selector": "default"},
+        "dmarc": {"present": dmarc["has_dmarc"], "policy": dmarc["policy"]}
+    }
+    
+    # ─── Blacklist (if IP provided) ───
+    if ip:
+        import dns.resolver as dnsr
+        bl_details = []
+        reversed_ip = ".".join(reversed(ip.split(".")))
+        listed = 0
+        
+        for name, zone in DNS_BLACKLISTS.items():
+            try:
+                r = dnsr.Resolver(); r.timeout = 3; r.lifetime = 3
+                ans = r.resolve(f"{reversed_ip}.{zone}", "A")
+                listed += 1
+                bl_details.append({"name": name, "status": "LISTEE", "response": str(ans[0])})
+            except dnsr.NXDOMAIN:
+                bl_details.append({"name": name, "status": "Clean", "response": "NXDOMAIN"})
+            except:
+                bl_details.append({"name": name, "status": "Inconnu", "response": "Timeout/Erreur"})
+        
+        results["blacklist"] = {
+            "ip": ip,
+            "listed": listed,
+            "total": len(DNS_BLACKLISTS),
+            "details": sorted(bl_details, key=lambda x: (x["status"] != "LISTEE", x["name"]))
+        }
+    
+    return results
+
+
+def generate_report_pdf(domain: str, ip: str = None) -> bytes:
+    """Generate and return a full PDF report for a domain."""
+    results = run_full_report(domain, ip)
+    report = DNSReport(domain, results)
+    return report.build()
