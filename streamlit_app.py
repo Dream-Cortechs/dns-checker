@@ -195,6 +195,16 @@ st.markdown("""
     section[data-testid="stSidebar"] {
         background: #0a1320; border-right: 1px solid var(--border);
     }
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stCaption,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] h3 {
+        color: #e2e8f0 !important;
+    }
+    section[data-testid="stSidebar"] .stTextInput label {
+        color: #c0cddc !important; font-size: 0.85rem !important; font-weight: 500 !important;
+    }
     
     /* ===== EXPANDER ===== */
     .streamlit-expanderHeader {
@@ -247,7 +257,7 @@ with st.sidebar:
     
     # Quick Scan
     st.markdown("### ⚡ Scan rapide")
-    st.caption("Tout vérifier en un clic : DNS + Email + Propagation")
+    st.markdown('<div style="color:#c0cddc;font-size:0.82rem;margin-bottom:0.8rem;">Tout vérifier en un clic : DNS + Email + Propagation</div>', unsafe_allow_html=True)
     
     qs_domain = st.text_input("Domaine", placeholder="ex: cortechs.fr", key="qs_domain")
     qs_ip = st.text_input("IP (optionnel)", placeholder="ex: 217.160.0.200", key="qs_ip")
@@ -308,7 +318,7 @@ with st.sidebar:
     
     # Rapport PDF
     st.markdown("### 📄 Rapport PDF")
-    st.caption("Rapport complet de diagnostic DNS")
+    st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Rapport complet de diagnostic DNS</div>', unsafe_allow_html=True)
     
     rpt_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="rpt_domain")
     rpt_ip = st.text_input("IP (blacklist)", placeholder="217.160.0.200", key="rpt_ip")
@@ -326,7 +336,7 @@ with st.sidebar:
                     st.error(str(e))
     
     st.markdown("---")
-    st.caption("Cortechs © 2026 · CT 115")
+    st.markdown('<div style="color:#94a3b8;font-size:0.78rem;">Cortechs © 2026 · CT 115</div>', unsafe_allow_html=True)
 
 
 # ─── TABS ───────────────────────────────────────────────────────────────────
@@ -397,7 +407,7 @@ with tab1:
             st.markdown(f'<span style="color:{"#f87171" if listed else "#4ade80"};font-weight:700;">{listed}/{len(bl["results"])} listé</span>', unsafe_allow_html=True)
         
         st.markdown("---")
-        st.caption("Détails complets dans les onglets 🔍 🌍 📧 🚫")
+        st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Détails complets dans les onglets 🔍 🌍 📧 🚫</div>', unsafe_allow_html=True)
     else:
         # Welcome state
         st.markdown("""
@@ -467,7 +477,7 @@ with tab2:
         domain = st.session_state.active_domain
         st.info(f"📋 Résultats du scan rapide pour **{domain}** — ou fais une recherche manuelle ci-dessous")
     
-    st.caption("Recherche manuelle d'enregistrements DNS")
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Recherche manuelle d\'enregistrements DNS</div>', unsafe_allow_html=True)
     col_d, col_t, col_r, col_b = st.columns([2.5, 1, 2, 1])
     
     with col_d:
@@ -504,7 +514,7 @@ with tab2:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab3:
-    st.caption("Vérifie la propagation DNS sur 24 résolveurs dans le monde")
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Vérifie la propagation DNS sur 24 résolveurs dans le monde</div>', unsafe_allow_html=True)
     
     col_pd, col_pt, col_pb = st.columns([2.5, 1, 1])
     with col_pd:
@@ -648,9 +658,9 @@ with tab4:
         st.markdown(sec_card(f"DMARC · {dmarc['policy']}" if dmarc_ok else "DMARC", "📋", dmarc_ok, dmarc_details), unsafe_allow_html=True)
         
         st.markdown("---")
-        st.caption("Analyse manuelle ci-dessous si besoin ↓")
+        st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Analyse manuelle ci-dessous si besoin ↓</div>', unsafe_allow_html=True)
     
-    st.caption("Analyse manuelle de la sécurité email")
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Analyse manuelle de la sécurité email</div>', unsafe_allow_html=True)
     col_ed, col_es, col_eb = st.columns([2.5, 1.5, 1])
     with col_ed:
         edom = st.text_input("Domaine", placeholder="cortechs.fr", key="em_domain", label_visibility="collapsed")
@@ -698,7 +708,7 @@ with tab5:
         listed = sum(1 for r in bl["results"].values() if r["listed"])
         st.info(f"📋 Scan rapide : IP **{bl['ip']}** — {listed}/{len(bl['results'])} listé")
     
-    st.caption("Vérifie si une IP est listée sur 12 blacklists DNS")
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Vérifie si une IP est listée sur 12 blacklists DNS</div>', unsafe_allow_html=True)
     col_ip, col_dm, col_bb = st.columns([2, 2, 1])
     with col_ip:
         bip = st.text_input("Adresse IP", placeholder="1.2.3.4", key="bl_ip", label_visibility="collapsed")
