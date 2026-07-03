@@ -223,7 +223,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="topbar">
-    <div class="shield">🔍</div>
+    <div class="shield"><img src="/app/static/cortechs-logo.png" style="width:36px;height:36px;object-fit:contain;"></div>
     <div>
         <h1>DNS CHECKER</h1>
         <div class="tagline">Diagnostic DNS mondial · Simple, rapide, complet</div>
