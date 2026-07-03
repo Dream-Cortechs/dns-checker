@@ -81,7 +81,8 @@ class DNSEngine:
             records = [str(ans) for ans in answers]
             return {"records": records, "count": len(records), "resolver": resolver_ip or "Système", "error": None}
         except dns.resolver.NoAnswer:
-            return {"records": [], "count": 0, "resolver": resolver_ip or "Système", "error": "Pas de réponse"}
+            return {"records": [], "count": 0, "resolver": resolver_ip or "Système", 
+                    "error": f"Aucun enregistrement {record_type} pour ce domaine (le domaine existe mais pas ce type d'enregistrement)"}
         except dns.resolver.NXDOMAIN:
             return {"records": [], "count": 0, "resolver": resolver_ip or "Système", "error": "Domaine inexistant"}
         except dns.resolver.Timeout:
