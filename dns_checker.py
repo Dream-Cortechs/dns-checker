@@ -493,10 +493,9 @@ class DNSLookupTab(ttk.Frame):
         choice = self.resolver_combo.get()
         if choice == "Système (par défaut)":
             return None
-        # Extraire l'IP des parenthèses : "Google 🇺🇸 (8.8.8.8)" → "8.8.8.8"
         import re
-        match = re.search(r'\(([^)]+)\)', choice)
-        return match.group(1) if match else None
+        matches = re.findall(r'\(([^)]+)\)', choice)
+        return matches[-1] if matches else None  # dernière occurrence = IP
     
     def do_lookup(self):
         domain = self.domain_entry.get().strip()

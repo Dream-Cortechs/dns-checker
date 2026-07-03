@@ -15,6 +15,7 @@ from datetime import datetime
 from collections import defaultdict
 import socket
 
+import dns
 from dns_engine import (
     DNSEngine, GLOBAL_RESOLVERS, DNS_BLACKLISTS, RECORD_TYPES,
     HAS_DNSPYTHON
@@ -347,13 +348,13 @@ with tab1:
         lookup_btn = st.button("🔍 Rechercher", key="lookup_btn", use_container_width=True)
     
     if lookup_btn and domain:
-        # Parse resolver IP
+        # Parse resolver IP (dernière parenthèse = IP, ignore les éventuelles parenthèses dans le nom)
         resolver_ip = None
         if resolver_choice != "Système (par défaut)":
             import re
-            match = re.search(r'\(([^)]+)\)', resolver_choice)
-            if match:
-                resolver_ip = match.group(1)
+            matches = re.findall(r'\(([^)]+)\)', resolver_choice)
+            if matches:
+                resolver_ip = matches[-1]  # dernière occurrence = IP
         
         with st.spinner(f"Recherche {record_type} pour {domain}..."):
             result = DNSEngine.query(domain.strip(), record_type, resolver_ip)
