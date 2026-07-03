@@ -1,7 +1,7 @@
 """
-DNS CHECKER — Streamlit Web App
-Diagnostic DNS complet : Lookup · Propagation · Sécurité Email · Blacklists
-Cortechs © 2026 — CT 115 (192.168.17.35:8506)
+DNS CHECKER — Streamlit Web App v3.0
+Diagnostic DNS friendly-user · Cortechs © 2026
+CT 115 (192.168.17.35:8506)
 """
 
 import sys, os
@@ -9,12 +9,10 @@ sys.path.insert(0, "/opt/dns-checker")
 
 import streamlit as st
 import pandas as pd
-import time
 import concurrent.futures
 from datetime import datetime
 from collections import defaultdict
-import socket
-import re
+import socket, re, io
 
 import dns
 from dns_engine import (
@@ -22,10 +20,10 @@ from dns_engine import (
     HAS_DNSPYTHON
 )
 from report import generate_report_pdf
-
+from whois_geo import get_whois, get_geoip, resolve_and_geo
 import plotly.graph_objects as go
 
-# ─── Geo coordinates ────────────────────────────────────────────────────────
+# ─── Geo ────────────────────────────────────────────────────────────────────
 
 RESOLVER_GEO = {
     "Google 🇺🇸": (37.42, -122.08), "Google (alt) 🇺🇸": (37.42, -122.06),
@@ -48,661 +46,850 @@ st.set_page_config(
     page_title="DNS CHECKER · Cortechs",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="auto"
 )
 
 # ─── CSS ────────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <style>
-    .stApp { background: #080e18; }
+    :root { --bg: #070d16; --surface: #0d1a2d; --border: #152540; --accent: #c9a94e; --text: #e2e8f0; --muted: #94a3b8; }
+    .stApp { background: var(--bg); }
     
-    /* ========== HEADER ========== */
-    .header-bar {
-        background: linear-gradient(135deg, #0d1a30 0%, #142240 100%);
-        border-bottom: 3px solid #c9a94e;
-        padding: 1rem 2rem;
-        display: flex;
-        align-items: center;
-        gap: 1.2rem;
-        margin-bottom: 1.5rem;
+    /* ===== HEADER ===== */
+    .topbar {
+        background: linear-gradient(135deg, #0b1628 0%, #101f38 100%);
+        border-bottom: 3px solid var(--accent);
+        padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem;
     }
-    .header-bar .logo {
-        width: 42px; height: 42px;
-        background: #c9a94e;
-        border-radius: 10px;
+    .topbar .shield {
+        background: var(--accent); color: #0a1628;
+        width: 44px; height: 44px; border-radius: 12px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 22px;
-        font-weight: 900;
-        color: #0a1628;
+        font-size: 24px; font-weight: 900;
     }
-    .header-bar h1 { color: #c9a94e; font-size: 1.6rem; font-weight: 700; margin: 0; }
-    .header-bar .sub { color: #667a99; font-size: 0.82rem; }
+    .topbar h1 { color: var(--accent); font-size: 1.5rem; font-weight: 700; margin: 0; }
+    .topbar .tagline { color: #5a7090; font-size: 0.8rem; }
     
-    /* ========== STAT ROW ========== */
-    .stat-row {
-        display: flex; gap: 1rem;
-        padding: 0 2rem; margin-bottom: 1.5rem;
+    /* ===== STATS ROW ===== */
+    .statrow { display: flex; gap: 0.6rem; padding: 0.8rem 2rem; flex-wrap: wrap; }
+    .statpill {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 20px; padding: 0.4rem 1rem;
+        font-size: 0.8rem; color: var(--muted);
+        display: flex; align-items: center; gap: 0.4rem;
     }
-    .stat-chip {
-        background: #0f1d33;
-        border: 1px solid #1a3050;
-        border-radius: 10px;
-        padding: 0.7rem 1.2rem;
-        display: flex; align-items: center; gap: 0.6rem;
-        font-size: 0.85rem; color: #c0cfe0;
-    }
-    .stat-chip .icon { font-size: 1.2rem; }
-    .stat-chip .val { color: #c9a94e; font-weight: 700; }
+    .statpill strong { color: var(--accent); }
     
-    /* ========== TABS ========== */
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; background: transparent; padding: 0 2rem; }
+    /* ===== WELCOME ===== */
+    .welcome {
+        text-align: center; padding: 3rem 2rem;
+    }
+    .welcome h2 { color: var(--accent); font-size: 1.8rem; margin-bottom: 0.5rem; }
+    .welcome p { color: var(--muted); font-size: 1rem; max-width: 600px; margin: 0 auto 1.5rem auto; }
+    .example-row { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin: 1rem 0; }
+    .example-chip {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 8px; padding: 0.5rem 1rem;
+        color: var(--text); font-size: 0.85rem;
+        cursor: pointer; transition: all 0.15s;
+    }
+    .example-chip:hover { border-color: var(--accent); color: var(--accent); }
+    
+    /* ===== TABS ===== */
+    .stTabs [data-baseweb="tab-list"] { gap: 2px; background: transparent; padding: 0 2rem; }
     .stTabs [data-baseweb="tab"] {
-        background: #0f1d33; color: #667a99;
-        border-radius: 10px 10px 0 0; padding: 0.5rem 1.4rem;
-        border: 1px solid #1a3050; font-size: 0.9rem;
-        margin-right: 2px;
+        background: var(--surface); color: var(--muted); border-radius: 10px 10px 0 0;
+        padding: 0.5rem 1.2rem; border: 1px solid var(--border); font-size: 0.85rem;
     }
-    .stTabs [aria-selected="true"] {
-        background: #152540; color: #c9a94e;
-        border-bottom: 2px solid #c9a94e;
-    }
+    .stTabs [aria-selected="true"] { background: #122340; color: var(--accent); border-bottom: 2px solid var(--accent); }
     
-    /* ========== CARDS ========== */
-    .dns-card {
-        background: #0f1d33;
-        border: 1px solid #1a3050;
-        border-radius: 12px;
-        padding: 0.8rem 1.2rem;
-        margin-bottom: 0.4rem;
-        display: flex; align-items: center; gap: 0.8rem;
-        transition: border-color 0.15s;
+    /* ===== CARDS ===== */
+    .r-card {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 0.7rem 1rem; margin-bottom: 5px;
+        display: flex; align-items: center; gap: 0.7rem;
     }
-    .dns-card:hover { border-color: #334d70; }
-    .dns-card .num {
-        background: #152540; color: #667a99;
-        width: 28px; height: 28px; border-radius: 8px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
+    .r-card .n { color: var(--muted); font-size: 0.75rem; width: 22px; text-align: right; }
+    .r-card .badge {
+        background: var(--accent); color: #0a1628;
+        padding: 2px 8px; border-radius: 5px; font-size: 0.68rem; font-weight: 700;
     }
-    .dns-card .type-badge {
-        background: #c9a94e; color: #0a1628;
-        padding: 2px 10px; border-radius: 6px;
-        font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-    }
-    .dns-card .val {
-        color: #d0ddf0; font-family: 'Consolas', monospace;
-        font-size: 0.9rem; word-break: break-all; flex: 1;
-    }
+    .r-card .v { color: var(--text); font-family: 'Consolas', monospace; font-size: 0.85rem; word-break: break-all; flex: 1; }
     
-    /* ========== PROPAGATION CELLS ========== */
-    .prop-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-    .prop-chip {
-        display: inline-flex; align-items: center; gap: 4px;
-        padding: 5px 10px; border-radius: 8px;
-        font-size: 0.78rem; font-family: 'Segoe UI', sans-serif;
+    /* ===== KPI TILES ===== */
+    .kpi {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 14px; padding: 1rem; text-align: center;
+    }
+    .kpi .num { font-size: 2rem; font-weight: 700; }
+    .kpi .num.g { color: #4ade80; }
+    .kpi .num.y { color: #facc15; }
+    .kpi .num.r { color: #f87171; }
+    .kpi .num.a { color: var(--accent); }
+    .kpi .lbl { font-size: 0.7rem; color: var(--muted); margin-top: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    /* ===== PROP CHIPS ===== */
+    .p-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+    .p-chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 10px; border-radius: 6px; font-size: 0.76rem;
         border: 1px solid transparent;
     }
-    .prop-chip.ok   { background: #0a2a1a; border-color: #1a5a3a; color: #4ade80; }
-    .prop-chip.warn { background: #2a2008; border-color: #5a4a18; color: #fbbf24; }
-    .prop-chip.err  { background: #2a0a0a; border-color: #5a1a1a; color: #f87171; }
-    .prop-chip .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .prop-chip .dot.g { background: #4ade80; }
-    .prop-chip .dot.y { background: #fbbf24; }
-    .prop-chip .dot.r { background: #e74c3c; }
+    .p-chip.good { background: #0a2818; border-color: #1a5a32; color: #4ade80; }
+    .p-chip.warn { background: #281e08; border-color: #5a4518; color: #facc15; }
+    .p-chip.bad  { background: #280a0a; border-color: #5a1515; color: #f87171; }
+    .p-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .p-chip .dot.good-bg { background: #4ade80; }
+    .p-chip .dot.warn-bg { background: #facc15; }
+    .p-chip .dot.bad-bg  { background: #f87171; }
     
-    /* ========== METRIC CARDS ========== */
-    .ktile {
-        background: #0f1d33; border: 1px solid #1a3050;
-        border-radius: 12px; padding: 1rem; text-align: center;
-    }
-    .ktile .big { font-size: 2rem; font-weight: 700; }
-    .ktile .big.green { color: #4ade80; }
-    .ktile .big.gold  { color: #c9a94e; }
-    .ktile .big.red   { color: #f87171; }
-    .ktile .lbl { font-size: 0.75rem; color: #667a99; margin-top: 0.2rem; }
-    
-    /* ========== SECURITY CARDS ========== */
-    .sec-card {
-        background: #0f1d33; border-radius: 14px;
-        padding: 1.3rem 1.5rem; margin-bottom: 0.8rem;
+    /* ===== SECURITY ===== */
+    .sec {
+        background: var(--surface); border-radius: 14px;
+        padding: 1.2rem 1.4rem; margin-bottom: 0.7rem;
         border-left: 5px solid #333;
     }
-    .sec-card.pass { border-left-color: #4ade80; }
-    .sec-card.warn { border-left-color: #f59e0b; }
-    .sec-card.fail { border-left-color: #f87171; }
-    .sec-card .sec-icon { font-size: 1.6rem; margin-right: 0.6rem; }
-    .sec-card h4 { color: #e0e6f0; margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
-    .sec-card .rec { color: #c0cfe0; font-family: 'Consolas', monospace; font-size: 0.82rem; margin-top: 0.4rem; word-break: break-all; }
-    .sec-card .stat { font-weight: 700; font-size: 0.85rem; }
+    .sec.ok   { border-left-color: #4ade80; }
+    .sec.warn { border-left-color: #f59e0b; }
+    .sec.fail { border-left-color: #f87171; }
+    .sec h4 { color: var(--text); margin: 0 0 0.3rem 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .sec .s { font-weight: 700; font-size: 0.82rem; }
+    .sec .d { color: var(--text); font-family: 'Consolas', monospace; font-size: 0.78rem; margin-top: 0.3rem; word-break: break-all; }
+    .sec .d.mute { color: var(--muted); }
     
-    /* ========== SCORE BADGE ========== */
-    .score-pill {
+    /* ===== SCORE ===== */
+    .score-badge {
         display: inline-flex; align-items: center; gap: 8px;
-        padding: 10px 22px; border-radius: 30px;
-        font-weight: 700; font-size: 1rem; margin: 0.8rem 0;
+        padding: 8px 20px; border-radius: 24px; font-weight: 700; font-size: 0.95rem;
     }
-    .score-pill.great { background: #0a2a1a; border: 2px solid #4ade80; color: #4ade80; }
-    .score-pill.ok    { background: #2a2008; border: 2px solid #f59e0b; color: #f59e0b; }
-    .score-pill.bad   { background: #2a0a0a; border: 2px solid #f87171; color: #f87171; }
+    .score-badge.high { background: #0a2818; border: 2px solid #4ade80; color: #4ade80; }
+    .score-badge.med  { background: #281e08; border: 2px solid #facc15; color: #facc15; }
+    .score-badge.low  { background: #280a0a; border: 2px solid #f87171; color: #f87171; }
     
-    /* ========== BLACKLIST CHIPS ========== */
-    .bl-chip {
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 6px 14px; border-radius: 20px;
-        font-size: 0.8rem; margin: 3px;
+    /* ===== BL CHIPS ===== */
+    .bl-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 0.8rem 0; }
+    .bl-pill {
+        padding: 5px 12px; border-radius: 16px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;
     }
-    .bl-chip.clean  { background: #0a2a1a; color: #4ade80; border: 1px solid #1a5a3a; }
-    .bl-chip.listed { background: #2a0a0a; color: #f87171; border: 1px solid #5a1a1a; font-weight: 700; }
-    .bl-chip.unknown { background: #1a1a2a; color: #94a3b8; border: 1px solid #334155; }
+    .bl-pill.clean  { background: #0a2818; color: #4ade80; border: 1px solid #1a5a32; }
+    .bl-pill.listed { background: #280a0a; color: #f87171; border: 1px solid #5a1515; font-weight: 700; }
+    .bl-pill.unknown { background: #151525; color: #888; border: 1px solid #333; }
     
-    /* ========== INPUT ========== */
-    .stTextInput > div > div > input {
-        background: #0f1d33 !important; border: 1px solid #1a3050 !important;
-        color: #e0e6f0 !important; border-radius: 10px !important; padding: 10px 14px !important;
-        font-size: 1rem !important;
+    /* ===== INPUTS ===== */
+    .stTextInput input {
+        background: var(--surface) !important; border: 1px solid var(--border) !important;
+        color: var(--text) !important; border-radius: 10px !important; padding: 10px 14px !important;
     }
-    .stTextInput > div > div > input:focus {
-        border-color: #c9a94e !important;
-        box-shadow: 0 0 0 3px rgba(201,169,78,0.15) !important;
+    .stTextInput input:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(201,169,78,0.12) !important; }
+    .stSelectbox>div>div { background: var(--surface) !important; border: 1px solid var(--border) !important; border-radius: 10px !important; }
+    
+    /* ===== BUTTONS ===== */
+    .stButton button {
+        background: var(--accent) !important; color: #0a1628 !important; font-weight: 700 !important;
+        border: none !important; border-radius: 10px !important; padding: 0.5rem 1.4rem !important;
+        transition: all 0.15s !important;
     }
-    .stSelectbox > div > div {
-        background: #0f1d33 !important; border: 1px solid #1a3050 !important; border-radius: 10px !important;
+    .stButton button:hover { background: #d4b860 !important; transform: translateY(-1px); }
+    
+    /* ===== SIDEBAR ===== */
+    section[data-testid="stSidebar"] {
+        background: #0a1320; border-right: 1px solid var(--border);
+    }
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stCaption,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] h3 {
+        color: #e2e8f0 !important;
+    }
+    section[data-testid="stSidebar"] .stTextInput label {
+        color: #c0cddc !important; font-size: 0.85rem !important; font-weight: 500 !important;
     }
     
-    /* ========== BUTTONS ========== */
-    .stButton > button {
-        background: #c9a94e !important; color: #0a1628 !important;
-        font-weight: 700 !important; border: none !important;
-        border-radius: 10px !important; padding: 0.55rem 1.6rem !important;
-        font-size: 0.9rem !important; transition: all 0.2s !important;
-    }
-    .stButton > button:hover { background: #d4b860 !important; transform: translateY(-1px); }
-    
-    /* ========== EXPANDER ========== */
+    /* ===== EXPANDER ===== */
     .streamlit-expanderHeader {
-        background: #0f1d33 !important; border: 1px solid #1a3050 !important;
-        border-radius: 10px !important; color: #c0cfe0 !important; font-weight: 600 !important;
+        background: var(--surface) !important; border: 1px solid var(--border) !important;
+        border-radius: 10px !important; color: var(--text) !important; font-weight: 600 !important;
     }
     
-    /* ========== FOOTER ========== */
-    .footer {
-        text-align: center; color: #3a5070; font-size: 0.72rem;
-        padding: 1.2rem; border-top: 1px solid #152540; margin-top: 2rem;
-    }
+    /* ===== FOOTER ===== */
+    .foot { text-align: center; color: #2a4060; font-size: 0.7rem; padding: 1rem; border-top: 1px solid #102038; margin-top: 2rem; }
+    
+    hr { border-color: var(--border); }
 </style>
 """, unsafe_allow_html=True)
 
-
 # ─── HEADER ─────────────────────────────────────────────────────────────────
 
-st.markdown("""
-<div class="header-bar">
-    <div class="logo">🔍</div>
-    <div>
-        <h1>DNS CHECKER</h1>
-        <div class="sub">Diagnostic DNS mondial · Cortechs</div>
+col_logo, col_title = st.columns([0.07, 0.93])
+with col_logo:
+    st.image("/opt/dns-checker/static/cortechs-logo.png", width=52)
+with col_title:
+    st.markdown("""
+    <div style="padding-top:0.3rem;">
+        <span style="color:#c9a94e;font-size:1.5rem;font-weight:700;">DNS CHECKER</span><br>
+        <span style="color:#5a7090;font-size:0.8rem;">Diagnostic DNS mondial · Simple, rapide, complet</span>
     </div>
+    """, unsafe_allow_html=True)
+
+st.markdown('<div style="height:3px;background:linear-gradient(90deg, #c9a94e, #1a3050);margin:0.8rem 0 1.2rem 0;"></div>', unsafe_allow_html=True)
+
+# ─── STAT PILLS ─────────────────────────────────────────────────────────────
+
+st.markdown(f"""
+<div class="statrow">
+    <span class="statpill">{'✅' if HAS_DNSPYTHON else '❌'} dnspython <strong>{dns.__version__ if HAS_DNSPYTHON else 'N/A'}</strong></span>
+    <span class="statpill">🌐 <strong>{len(GLOBAL_RESOLVERS)}</strong> résolveurs mondiaux</span>
+    <span class="statpill">🛡️ <strong>{len(DNS_BLACKLISTS)}</strong> blacklists</span>
+    <span class="statpill">📋 <strong>{len(RECORD_TYPES)}</strong> types DNS</span>
+    <span class="statpill">📄 Rapport PDF inclus</span>
 </div>
 """, unsafe_allow_html=True)
 
-# ─── STAT CHIPS ─────────────────────────────────────────────────────────────
+# ─── SESSION STATE ──────────────────────────────────────────────────────────
 
-col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-with col_s1:
-    icon = "✅" if HAS_DNSPYTHON else "❌"
-    c = "#4ade80" if HAS_DNSPYTHON else "#f87171"
-    st.markdown(f"""
-    <div class="stat-chip">
-        <span class="icon">{icon}</span>
-        <span>dnspython <span class="val">{dns.__version__ if HAS_DNSPYTHON else 'N/A'}</span></span>
-    </div>
-    """, unsafe_allow_html=True)
-with col_s2:
-    st.markdown(f'<div class="stat-chip"><span class="icon">🌐</span><span><span class="val">{len(GLOBAL_RESOLVERS)}</span> résolveurs</span></div>', unsafe_allow_html=True)
-with col_s3:
-    st.markdown(f'<div class="stat-chip"><span class="icon">🛡️</span><span><span class="val">{len(DNS_BLACKLISTS)}</span> blacklists</span></div>', unsafe_allow_html=True)
-with col_s4:
-    st.markdown(f'<div class="stat-chip"><span class="icon">📋</span><span><span class="val">{len(RECORD_TYPES)}</span> types DNS</span></div>', unsafe_allow_html=True)
+for key in ["results_lookup", "results_prop", "results_email", "results_bl", "active_domain"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
 
-
-# ─── SIDEBAR: Rapport PDF ───────────────────────────────────────────────────
+# ─── SIDEBAR ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("## 📄 Rapport PDF")
-    st.markdown("Génère un rapport complet de diagnostic DNS pour un domaine.")
+    st.image("https://img.shields.io/badge/DNS_CHECKER-v3.0-c9a94e?style=for-the-badge", width=180)
+    st.markdown("---")
     
-    report_domain = st.text_input("Domaine", placeholder="ex: cortechs.fr", key="report_domain")
-    report_ip = st.text_input("IP (optionnel, pour blacklist)", placeholder="ex: 1.2.3.4", key="report_ip")
+    # Quick Scan
+    st.markdown("### ⚡ Scan rapide")
+    st.markdown('<div style="color:#c0cddc;font-size:0.82rem;margin-bottom:0.8rem;">Tout vérifier en un clic : DNS + Email + Propagation</div>', unsafe_allow_html=True)
     
-    if st.button("📄 Générer le rapport", key="report_btn", use_container_width=True):
-        if report_domain:
-            ip = report_ip.strip() or None
-            with st.spinner(f"Génération du rapport pour **{report_domain}**...\n\n"
-                          f"🔍 DNS Lookup → 🌍 Propagation → 📧 Sécurité Email → 🚫 Blacklists"):
-                try:
-                    pdf_bytes = generate_report_pdf(report_domain.strip(), ip)
-                    st.success(f"✅ Rapport prêt — {len(pdf_bytes) // 1024} Ko")
-                    st.download_button(
-                        label="📥 Télécharger le rapport PDF",
-                        data=pdf_bytes,
-                        file_name=f"dns-report-{report_domain.strip()}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-                except Exception as e:
-                    st.error(f"Erreur: {e}")
+    qs_domain = st.text_input("Domaine", placeholder="ex: cortechs.fr", key="qs_domain")
+    qs_ip = st.text_input("IP (optionnel)", placeholder="ex: 217.160.0.200", key="qs_ip")
+    
+    if st.button("⚡ Lancer le scan complet", use_container_width=True, type="primary"):
+        if qs_domain:
+            st.session_state.active_domain = qs_domain.strip()
+            with st.spinner("Scan complet en cours..."):
+                ip = qs_ip.strip() or None
+                # Lookup
+                lookup = {}
+                for rt in ["A", "AAAA", "MX", "TXT", "NS", "SOA"]:
+                    r = DNSEngine.query(qs_domain.strip(), rt)
+                    if r["records"]: lookup[rt.lower()] = r["records"]
+                st.session_state.results_lookup = lookup
+                
+                # Email
+                mx = DNSEngine.query_mx(qs_domain.strip())
+                spf = DNSEngine.check_spf(qs_domain.strip())
+                dkim = DNSEngine.check_dkim(qs_domain.strip(), "default")
+                dmarc = DNSEngine.check_dmarc(qs_domain.strip())
+                st.session_state.results_email = {"mx": mx, "spf": spf, "dkim": dkim, "dmarc": dmarc}
+                
+                # Propagation (light: 6 resolvers)
+                prop_results = []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+                    sample = dict(list(GLOBAL_RESOLVERS.items())[:6])
+                    futures = {ex.submit(DNSEngine.query, qs_domain.strip(), "A", ip_addr, 5): name 
+                               for name, ip_addr in sample.items()}
+                    for f in concurrent.futures.as_completed(futures):
+                        name = futures[f]
+                        try: r = f.result(timeout=5)
+                        except: r = {"records": [], "error": "Exception"}
+                        prop_results.append((name, sample[name], r))
+                st.session_state.results_prop = prop_results
+                
+                # Blacklist if IP
+                if ip:
+                    import dns.resolver as dnsr
+                    bl_results = {}
+                    rip = ".".join(reversed(ip.split(".")))
+                    for name, zone in DNS_BLACKLISTS.items():
+                        try:
+                            rx = dnsr.Resolver(); rx.timeout = 3; rx.lifetime = 3
+                            ans = rx.resolve(f"{rip}.{zone}", "A")
+                            bl_results[name] = {"listed": True, "response": str(ans[0])}
+                        except dnsr.NXDOMAIN:
+                            bl_results[name] = {"listed": False, "response": "NXDOMAIN"}
+                        except:
+                            bl_results[name] = {"listed": False, "response": "?"}
+                    st.session_state.results_bl = {"ip": ip, "results": bl_results}
+            st.success("✅ Scan terminé ! Voir les onglets ↓")
+            st.rerun()
         else:
-            st.warning("Saisis un domaine")
+            st.warning("Entre un domaine d'abord")
     
     st.markdown("---")
-    st.caption(f"DNS CHECKER v2.0 · CT 115")
+    
+    # Rapport PDF
+    st.markdown("### 📄 Rapport PDF")
+    st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Rapport complet de diagnostic DNS</div>', unsafe_allow_html=True)
+    
+    rpt_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="rpt_domain")
+    rpt_ip = st.text_input("IP (blacklist)", placeholder="217.160.0.200", key="rpt_ip")
+    
+    if st.button("📄 Générer le rapport PDF", use_container_width=True):
+        if rpt_domain:
+            with st.spinner("Génération du rapport..."):
+                try:
+                    pdf = generate_report_pdf(rpt_domain.strip(), rpt_ip.strip() or None)
+                    st.download_button("📥 Télécharger", pdf,
+                        f"dns-{rpt_domain.strip()}-{datetime.now():%Y%m%d-%H%M}.pdf",
+                        "application/pdf", use_container_width=True)
+                    st.success(f"✅ {len(pdf)//1024} Ko")
+                except Exception as e:
+                    st.error(str(e))
+    
+    st.markdown("---")
+    st.markdown('<div style="color:#94a3b8;font-size:0.78rem;">Cortechs © 2026 · CT 115</div>', unsafe_allow_html=True)
 
 
 # ─── TABS ───────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🔍  DNS Lookup", 
-    "🌍  Propagation", 
-    "📧  Sécurité Email", 
-    "🚫  Blacklists"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🏠  Accueil", "🔍  DNS Lookup", "🌍  Propagation", "📧  Sécurité Email", "🚫  Blacklists",
+    "🌐  Whois & Géo"
 ])
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 1: DNS LOOKUP
+# TAB 0: HOME / QUICK OVERVIEW
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab1:
-    st.markdown("---")
-    col_d, col_t, col_r, col_b = st.columns([3, 1.3, 2.2, 1])
-    with col_d:
-        domain = st.text_input("Domaine", placeholder="ex: google.com", key="lookup_domain", label_visibility="collapsed")
-    with col_t:
-        record_type = st.selectbox("Type", RECORD_TYPES, index=0, key="lookup_type", label_visibility="collapsed")
-    with col_r:
-        resolver_options = ["🖥️ Système (par défaut)"] + [f"{name}  ({ip})" for name, ip in GLOBAL_RESOLVERS.items()]
-        resolver_choice = st.selectbox("Résolveur", resolver_options, key="lookup_resolver", label_visibility="collapsed")
-    with col_b:
-        lookup_btn = st.button("🔍 Rechercher", key="lookup_btn", use_container_width=True)
-    
-    if lookup_btn and domain:
-        resolver_ip = None
-        if not resolver_choice.startswith("🖥️"):
-            matches = re.findall(r'\(([^)]+)\)', resolver_choice)
-            if matches: resolver_ip = matches[-1]
+    # Show results if quick scan was done
+    if st.session_state.results_lookup and st.session_state.active_domain:
+        domain = st.session_state.active_domain
+        st.success(f"### ✅ Résultats pour **{domain}**")
         
-        with st.spinner(f"🔍 Recherche **{record_type}** pour **{domain}**..."):
-            result = DNSEngine.query(domain.strip(), record_type, resolver_ip, timeout=8)
+        col_a, col_b, col_c = st.columns(3)
         
-        if result["error"]:
-            st.error(f"❌ {result['error']}")
-        elif result["records"]:
-            st.success(f"✅ **{len(result['records'])}** enregistrement(s) {record_type} trouvé(s)")
-            for i, rec in enumerate(result["records"], 1):
-                st.markdown(f"""
-                <div class="dns-card">
-                    <div class="num">{i}</div>
-                    <div class="type-badge">{record_type}</div>
-                    <div class="val">{rec}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info(f"ℹ️ Aucun enregistrement {record_type} pour ce domaine")
+        with col_a:
+            lookup = st.session_state.results_lookup
+            count = sum(len(v) for v in lookup.values())
+            st.markdown(f'<div class="kpi"><div class="num a">{count}</div><div class="lbl">Enregistrements DNS</div></div>', unsafe_allow_html=True)
         
-        st.caption(f"Résolveur : **{resolver_ip or 'système'}** · {datetime.now().strftime('%H:%M:%S')}")
+        with col_b:
+            email = st.session_state.results_email or {}
+            score = 0
+            if email:
+                if email["mx"]["mx_records"]: score += 1
+                if email["spf"]["has_spf"] and email["spf"]["all_mechanism"]: score += 1
+                if email["dkim"]["has_dkim"]: score += 1
+                if email["dmarc"]["has_dmarc"] and ("reject" in email["dmarc"]["policy"].lower() or "quarantine" in email["dmarc"]["policy"].lower()): score += 1
+            cls = "g" if score >= 4 else "y" if score >= 2 else "r"
+            st.markdown(f'<div class="kpi"><div class="num {cls}">{score}/4</div><div class="lbl">Score Sécurité Email</div></div>', unsafe_allow_html=True)
+        
+        with col_c:
+            prop = st.session_state.results_prop or []
+            ok = sum(1 for _,_,r in prop if r["error"] is None and r["records"])
+            cls = "g" if ok == len(prop) else "y"
+            st.markdown(f'<div class="kpi"><div class="num {cls}">{ok}/{len(prop)}</div><div class="lbl">Résolveurs OK</div></div>', unsafe_allow_html=True)
+        
+        # Quick DNS records
+        if lookup:
+            st.markdown("#### 🔍 Enregistrements DNS")
+            for rt in ["a", "aaaa", "mx", "txt", "ns", "soa"]:
+                recs = lookup.get(rt)
+                if recs:
+                    val = ", ".join(str(r)[:60] for r in recs[:3])
+                    st.markdown(f'<div style="color:#e2e8f0;font-family:Consolas,monospace;font-size:0.85rem;padding:2px 0;"><span style="color:#c9a94e;font-weight:700;">{rt.upper()}</span> — {val}</div>', unsafe_allow_html=True)
+        
+        # Quick email
+        if email:
+            st.markdown("#### 📧 Sécurité Email")
+            spf = email["spf"]; dkim = email["dkim"]; dmarc = email["dmarc"]
+            icons = []
+            icons.append("✅" if spf["has_spf"] else "❌")
+            icons.append("✅" if dkim["has_dkim"] else "❌")
+            icons.append("✅" if dmarc["has_dmarc"] else "❌")
+            st.markdown(f'<div style="color:#e2e8f0;font-size:0.9rem;">SPF {icons[0]} · DKIM {icons[1]} · DMARC {icons[2]}  —  <span style="color:#c9a94e;font-weight:700;">Score {score}/4</span></div>', unsafe_allow_html=True)
+        
+        if st.session_state.results_bl:
+            bl = st.session_state.results_bl
+            listed = sum(1 for r in bl["results"].values() if r["listed"])
+            st.markdown("#### 🚫 Blacklists")
+            color = "r" if listed else "g"
+            st.markdown(f'<span style="color:{"#f87171" if listed else "#4ade80"};font-weight:700;">{listed}/{len(bl["results"])} listé</span>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Détails complets dans les onglets 🔍 🌍 📧 🚫</div>', unsafe_allow_html=True)
+    else:
+        # Welcome state
+        st.markdown("""
+        <div class="welcome">
+            <h2>🔍 Bienvenue sur DNS CHECKER</h2>
+            <p>Diagnostiquez n'importe quel nom de domaine en un clin d'œil. 
+            DNS, propagation mondiale, sécurité email, blacklists — tout au même endroit.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Quick actions
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("""
+            <div class="kpi" style="cursor:default">
+                <div style="font-size:2rem">🔍</div>
+                <div style="font-weight:700;color:#cdd6e4;margin:0.4rem 0;">DNS Lookup</div>
+                <div style="font-size:0.75rem;color:#6b7d95;">A, AAAA, MX, TXT, NS, SOA, CNAME…</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown("""
+            <div class="kpi" style="cursor:default">
+                <div style="font-size:2rem">🌍</div>
+                <div style="font-weight:700;color:#cdd6e4;margin:0.4rem 0;">Propagation</div>
+                <div style="font-size:0.75rem;color:#6b7d95;">24 résolveurs dans le monde</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown("""
+            <div class="kpi" style="cursor:default">
+                <div style="font-size:2rem">📧</div>
+                <div style="font-weight:700;color:#cdd6e4;margin:0.4rem 0;">Sécurité Email</div>
+                <div style="font-size:0.75rem;color:#6b7d95;">SPF · DKIM · DMARC · MX</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        st.markdown("#### 💡 Exemples de domaines à tester")
+        examples = ["cortechs.fr", "google.com", "github.com", "eff.org", "gouv.fr"]
+        cols = st.columns(len(examples))
+        for i, ex in enumerate(examples):
+            with cols[i]:
+                if st.button(ex, key=f"ex_{ex}", use_container_width=True):
+                    st.session_state.active_domain = ex
+                    # Trigger quick scan via rerun
+                    st.info(f"👉 Ouvre le panneau latéral (←) et lance un **Scan rapide** pour **{ex}**")
+        
+        st.markdown("---")
+        st.markdown("#### 🚀 Comment ça marche ?")
+        st.markdown("""
+        1. **Ouvre le panneau latéral** (flèche en haut à gauche ←)
+        2. **Entre un domaine** et lance le ⚡ Scan rapide
+        3. **Explore les onglets** pour les détails
+        4. **Génère un rapport PDF** depuis le panneau latéral
+        """)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2: PROPAGATION
+# TAB 2: DNS LOOKUP
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    st.markdown("---")
-    col_pd, col_pt, col_pb = st.columns([3, 1.3, 1])
-    with col_pd:
-        prop_domain = st.text_input("Domaine", placeholder="ex: google.com", key="prop_domain", label_visibility="collapsed")
-    with col_pt:
-        prop_type = st.selectbox("Type", RECORD_TYPES, index=0, key="prop_type", label_visibility="collapsed")
-    with col_pb:
-        prop_btn = st.button("🌍 Vérifier la propagation", key="prop_btn", use_container_width=True)
+    # If quick scan results exist, show them
+    if st.session_state.results_lookup and st.session_state.active_domain:
+        domain = st.session_state.active_domain
+        st.info(f"📋 Résultats du scan rapide pour **{domain}** — ou fais une recherche manuelle ci-dessous")
     
-    if prop_btn and prop_domain:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Recherche manuelle d\'enregistrements DNS</div>', unsafe_allow_html=True)
+    col_d, col_t, col_r, col_b = st.columns([2.5, 1, 2, 1])
+    
+    with col_d:
+        domain = st.text_input("Domaine", placeholder="google.com", key="lu_domain", label_visibility="collapsed")
+    with col_t:
+        rt = st.selectbox("Type", RECORD_TYPES, index=0, key="lu_type", label_visibility="collapsed")
+    with col_r:
+        ropts = ["🖥️ Système"] + [f"{n} ({ip})" for n, ip in GLOBAL_RESOLVERS.items()]
+        rchoice = st.selectbox("Résolveur", ropts, key="lu_resolver", label_visibility="collapsed")
+    with col_b:
+        btn = st.button("🔍 Rechercher", key="lu_btn", use_container_width=True)
+    
+    if btn and domain:
+        rip = None
+        if not rchoice.startswith("🖥️"):
+            m = re.findall(r'\(([^)]+)\)', rchoice)
+            if m: rip = m[-1]
         
-        results = []
-        total = len(GLOBAL_RESOLVERS)
+        with st.spinner(f"Recherche {rt} pour {domain}..."):
+            r = DNSEngine.query(domain.strip(), rt, rip, timeout=8)
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(DNSEngine.query, prop_domain.strip(), prop_type, ip, 6): (name, ip) 
-                       for name, ip in GLOBAL_RESOLVERS.items()}
-            for completed, future in enumerate(concurrent.futures.as_completed(futures), 1):
-                name, ip = futures[future]
-                try: r = future.result(timeout=6)
-                except: r = {"records": [], "error": "Exception"}
-                results.append((name, ip, r))
-                progress_bar.progress(completed / total)
-                status_text.text(f"⏳ {completed}/{total} résolveurs...")
-        
-        progress_bar.empty(); status_text.empty()
-        results.sort(key=lambda x: (x[2]["error"] is not None or not x[2]["records"], x[0]))
-        
-        success_count = sum(1 for _, _, r in results if r["error"] is None and r["records"])
-        consensus = defaultdict(list)
-        for name, ip, r in results:
-            if r["error"] is None and r["records"]:
-                consensus[r["records"][0]].append(name)
-        
-        most_common = max(consensus.keys(), key=lambda k: len(consensus[k]), default="N/A")
-        consensus_pct = (len(consensus[most_common]) / total * 100) if consensus else 0
-        
-        # Metrics
-        cm1, cm2, cm3, cm4 = st.columns(4)
-        with cm1:
-            color = "green" if success_count == total else "red" if success_count < total/2 else "gold"
-            st.markdown(f'<div class="ktile"><div class="big {color}">{success_count}/{total}</div><div class="lbl">Résolveurs OK</div></div>', unsafe_allow_html=True)
-        with cm2:
-            st.markdown(f'<div class="ktile"><div class="big gold">{consensus_pct:.0f}%</div><div class="lbl">Consensus</div></div>', unsafe_allow_html=True)
-        with cm3:
-            val_color = "green" if consensus_pct > 80 else "gold" if consensus_pct > 50 else "red"
-            st.markdown(f'<div class="ktile"><div class="big {val_color}" style="font-size:1.1rem;word-break:break-all;">{most_common[:25]}</div><div class="lbl">Valeur majoritaire</div></div>', unsafe_allow_html=True)
-        with cm4:
-            rtts = []
-            st.markdown(f'<div class="ktile"><div class="big gold">{success_count}</div><div class="lbl">Réponses reçues</div></div>', unsafe_allow_html=True)
-        
-        # 🌍 Map
-        map_lats, map_lons, map_colors, map_texts, map_sizes = [], [], [], [], []
-        for name, ip, r in results:
-            geo = RESOLVER_GEO.get(name)
-            if geo:
-                map_lats.append(geo[0]); map_lons.append(geo[1])
-                if r["error"] is None and r["records"]:
-                    map_colors.append("#4ade80"); map_sizes.append(12)
-                elif r["error"] is None:
-                    map_colors.append("#fbbf24"); map_sizes.append(9)
-                else:
-                    map_colors.append("#f87171"); map_sizes.append(9)
-                map_texts.append(f"{name}<br>{ip}<br>{r['records'][0] if r['records'] else (r.get('error') or '?')}")
-        
-        if map_lats:
-            fig = go.Figure(go.Scattergeo(lon=map_lons, lat=map_lats, mode="markers",
-                marker=dict(size=map_sizes, color=map_colors, line=dict(width=1, color="#0a1628")),
-                text=map_texts, hoverinfo="text"))
-            fig.update_layout(
-                geo=dict(projection_type="natural earth", showland=True, landcolor="#0f1d33",
-                    showocean=True, oceancolor="#080e18", showcountries=True, countrycolor="#1a3050",
-                    coastlinecolor="#1a3050", showframe=False, bgcolor="#080e18"),
-                paper_bgcolor="#080e18", plot_bgcolor="#080e18",
-                margin=dict(l=5, r=5, t=5, b=5), height=380, showlegend=False, dragmode=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        
-        # Propagation chips
-        st.markdown("### 🌐 Résultats par résolveur")
-        chips_html = '<div class="prop-grid">'
-        for name, ip, r in results:
-            if r["error"] is None and r["records"]:
-                cls, dot = "ok", "g"
-                icon = "✅"
-                val = r["records"][0][:40]
-                if len(r["records"]) > 1: val += f" +{len(r['records'])-1}"
-            elif r["error"] is None:
-                cls, dot = "warn", "y"
-                icon = "⚠️"
-                val = "aucun enregistrement"
-            else:
-                cls, dot = "err", "r"
-                icon = "❌"
-                val = r["error"][:35]
-            chips_html += f'<div class="prop-chip {cls}" title="{name} ({ip})"><span class="dot {dot}"></span><strong>{name.split(chr(32))[0]}</strong> {val}</div>'
-        chips_html += '</div>'
-        st.markdown(chips_html, unsafe_allow_html=True)
-        
-        # Expander with full details
-        with st.expander("📋 Voir le tableau détaillé"):
-            data = []
-            for name, ip, r in results:
-                if r["error"] is None and r["records"]:
-                    val = r["records"][0]
-                    extra = f" (+{len(r['records'])-1})" if len(r["records"]) > 1 else ""
-                    sts = "✅"
-                elif r["error"] is None:
-                    val = "—"; extra = ""; sts = "⚠️"
-                else:
-                    val = r["error"]; extra = ""; sts = "❌"
-                data.append({"Résolveur": name, "IP": ip, "Résultat": val + extra, "Statut": sts})
-            st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
-        
-        st.caption(f"Domaine : **{prop_domain}** · Type : **{prop_type}** · {datetime.now().strftime('%H:%M:%S')}")
+        if r["error"]:
+            st.error(f"❌ {r['error']}")
+        elif r["records"]:
+            st.success(f"**{len(r['records'])}** enregistrement(s) {rt}")
+            for i, rec in enumerate(r["records"], 1):
+                st.markdown(f'<div class="r-card"><span class="n">{i}</span><span class="badge">{rt}</span><span class="v">{rec}</span></div>', unsafe_allow_html=True)
+        else:
+            st.info("Aucun enregistrement trouvé")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3: EMAIL SECURITY
+# TAB 3: PROPAGATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab3:
-    st.markdown("---")
-    col_ed, col_es, col_eb = st.columns([3, 1.8, 1])
-    with col_ed:
-        email_domain = st.text_input("Domaine", placeholder="ex: cortechs.fr", key="email_domain", label_visibility="collapsed")
-    with col_es:
-        dkim_selector = st.text_input("Sélecteur DKIM", value="default", key="dkim_selector", label_visibility="collapsed", placeholder="default")
-    with col_eb:
-        email_btn = st.button("🔒 Analyser", key="email_btn", use_container_width=True)
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Vérifie la propagation DNS sur 24 résolveurs dans le monde</div>', unsafe_allow_html=True)
     
-    if email_btn and email_domain:
-        domain = email_domain.strip()
-        selector = dkim_selector.strip() or "default"
+    col_pd, col_pt, col_pb = st.columns([2.5, 1, 1])
+    with col_pd:
+        pdomain = st.text_input("Domaine", placeholder="google.com", key="pr_domain", label_visibility="collapsed")
+    with col_pt:
+        ptype = st.selectbox("Type", RECORD_TYPES, index=0, key="pr_type", label_visibility="collapsed")
+    with col_pb:
+        pbtn = st.button("🌍 Vérifier", key="pr_btn", use_container_width=True)
+    
+    if pbtn and pdomain:
+        bar = st.progress(0); stxt = st.empty()
+        results = []
+        total = len(GLOBAL_RESOLVERS)
         
-        with st.spinner(f"🔒 Analyse sécurité email pour **{domain}**..."):
-            mx = DNSEngine.query_mx(domain)
-            spf = DNSEngine.check_spf(domain)
-            dkim = DNSEngine.check_dkim(domain, selector)
-            dmarc = DNSEngine.check_dmarc(domain)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            futs = {ex.submit(DNSEngine.query, pdomain.strip(), ptype, ip, 6): (n, ip) for n, ip in GLOBAL_RESOLVERS.items()}
+            for i, f in enumerate(concurrent.futures.as_completed(futs), 1):
+                n, ip = futs[f]
+                try: res = f.result(timeout=6)
+                except: res = {"records": [], "error": "Exception"}
+                results.append((n, ip, res))
+                bar.progress(i/total); stxt.text(f"{i}/{total} résolveurs...")
         
-        score = 0
+        bar.empty(); stxt.empty()
+        results.sort(key=lambda x: (x[2]["error"] is not None or not x[2]["records"], x[0]))
         
-        # ─── MX ───
-        if mx["mx_records"]:
-            border, icon, status_color = "pass", "📨", "#4ade80"
-            status_txt = f"{len(mx['mx_records'])} serveur(s) MX"
-            records_html = "".join(f'<div class="rec">Priorité {p} → {h}</div>' for p, h in mx["mx_records"][:10])
-            score += 1
-        elif mx.get("error") == "Pas de réponse" or mx.get("error", "").startswith("Aucun"):
-            border, icon, status_color = "warn", "📨", "#f59e0b"
-            status_txt = "Aucun MX"
-            records_html = '<div class="rec">Aucun enregistrement MX</div>'
-        else:
-            border, icon, status_color = "fail", "📨", "#f87171"
-            status_txt = mx.get("error", "Erreur")
-            records_html = f'<div class="rec">{status_txt}</div>'
+        ok = sum(1 for _,_,r in results if r["error"] is None and r["records"])
+        consensus = defaultdict(list)
+        for n, ip, r in results:
+            if r["error"] is None and r["records"]: consensus[r["records"][0]].append(n)
+        mc = max(consensus, key=lambda k: len(consensus[k]), default="N/A")
+        cpct = (len(consensus[mc])/total*100) if consensus else 0
         
-        st.markdown(f"""
-        <div class="sec-card {border}">
-            <h4><span class="sec-icon">{icon}</span> MX — Serveurs Mail</h4>
-            <div class="stat" style="color:{status_color}">{status_txt}</div>
-            {records_html}
-        </div>
-        """, unsafe_allow_html=True)
+        cm1, cm2, cm3, cm4 = st.columns(4)
+        with cm1:
+            c = "g" if ok==total else "r" if ok<total/2 else "y"
+            st.markdown(f'<div class="kpi"><div class="num {c}">{ok}/{total}</div><div class="lbl">OK</div></div>', unsafe_allow_html=True)
+        with cm2:
+            st.markdown(f'<div class="kpi"><div class="num a">{cpct:.0f}%</div><div class="lbl">Consensus</div></div>', unsafe_allow_html=True)
+        with cm3:
+            st.markdown(f'<div class="kpi"><div class="num a" style="font-size:1rem;word-break:break-all;">{mc[:20]}</div><div class="lbl">Majoritaire</div></div>', unsafe_allow_html=True)
+        with cm4:
+            st.markdown(f'<div class="kpi"><div class="num a">{ok}</div><div class="lbl">Réponses</div></div>', unsafe_allow_html=True)
         
-        # ─── SPF ───
-        if spf["has_spf"]:
-            score += 1
-            if spf["all_mechanism"]:
-                border, icon, color, mech = "pass", "🛡️", "#4ade80", "🔒 Hard Fail (-all)"
-            elif spf["soft_all"]:
-                border, icon, color, mech = "warn", "🛡️", "#f59e0b", "⚠️ Soft Fail (~all)"
+        # Map
+        mlats, mlons, mcols, mtxts, msizes = [], [], [], [], []
+        for n, ip, r in results:
+            geo = RESOLVER_GEO.get(n)
+            if geo:
+                mlats.append(geo[0]); mlons.append(geo[1])
+                if r["error"] is None and r["records"]:
+                    mcols.append("#4ade80"); msizes.append(12)
+                elif r["error"] is None:
+                    mcols.append("#facc15"); msizes.append(9)
+                else:
+                    mcols.append("#f87171"); msizes.append(9)
+                mtxts.append(f"{n}<br>{ip}<br>{r['records'][0] if r['records'] else r.get('error','?')}")
+        
+        if mlats:
+            fig = go.Figure(go.Scattergeo(lon=mlons, lat=mlats, mode="markers",
+                marker=dict(size=msizes, color=mcols, line=dict(width=1, color="#070d16")),
+                text=mtxts, hoverinfo="text"))
+            fig.update_layout(geo=dict(projection_type="natural earth", showland=True,
+                landcolor="#0d1a2d", showocean=True, oceancolor="#070d16",
+                showcountries=True, countrycolor="#152540", coastlinecolor="#152540",
+                showframe=False, bgcolor="#070d16"),
+                paper_bgcolor="#070d16", plot_bgcolor="#070d16",
+                margin=dict(l=5,r=5,t=5,b=5), height=360, showlegend=False, dragmode=False)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        
+        # Chips
+        chips = '<div class="p-grid">'
+        for n, ip, r in results:
+            if r["error"] is None and r["records"]:
+                cls, dot = "good", "good-bg"
+                v = r["records"][0][:35]
+                if len(r["records"])>1: v += f" +{len(r['records'])-1}"
+            elif r["error"] is None:
+                cls, dot = "warn", "warn-bg"; v = "vide"
             else:
-                border, icon, color, mech = "warn", "🛡️", "#f59e0b", "⚠️ Neutral (?all)"
-            recs = "".join(f'<div class="rec">{r}</div>' for r in spf["spf_records"])
-        else:
-            border, icon, color, mech = "fail", "🛡️", "#f87171", "❌ Absent"
-            recs = '<div class="rec">Aucun SPF trouvé</div>'
+                cls, dot = "bad", "bad-bg"; v = r["error"][:30]
+            chips += f'<span class="p-chip {cls}" title="{n} ({ip})"><span class="dot {dot}"></span><strong>{n.split()[0]}</strong> {v}</span>'
+        chips += '</div>'
+        st.markdown(chips, unsafe_allow_html=True)
         
-        st.markdown(f"""
-        <div class="sec-card {border}">
-            <h4><span class="sec-icon">{icon}</span> SPF — Sender Policy Framework</h4>
-            <div class="stat" style="color:{color}">{mech}</div>
-            {recs}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # ─── DKIM ───
-        if dkim["has_dkim"]:
-            border, icon, color, stat = "pass", "🔑", "#4ade80", f"✅ Présent (sélecteur: {selector})"
-            recs = "".join(f'<div class="rec">{r[:150]}</div>' for r in dkim["dkim_records"])
-            score += 1
-        else:
-            border, icon, color, stat = "fail", "🔑", "#f87171", f"❌ Absent"
-            recs = f'<div class="rec">Domaine: {dkim["domain"]}</div>'
-            recs += '<div class="rec" style="color:#667a99;">Essayez: google, selector1, s1, mail</div>'
-        
-        st.markdown(f"""
-        <div class="sec-card {border}">
-            <h4><span class="sec-icon">{icon}</span> DKIM — DomainKeys Identified Mail</h4>
-            <div class="stat" style="color:{color}">{stat}</div>
-            {recs}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # ─── DMARC ───
-        if dmarc["has_dmarc"]:
-            if "reject" in dmarc["policy"].lower() or "quarantine" in dmarc["policy"].lower():
-                border, icon, color = "pass", "📋", "#4ade80"
-                score += 1
-            else:
-                border, icon, color = "warn", "📋", "#f59e0b"
-            stat = f"✅ {dmarc['policy']}"
-            recs = "".join(f'<div class="rec">{r}</div>' for r in dmarc["dmarc_records"])
-        else:
-            border, icon, color, stat = "fail", "📋", "#f87171", "❌ Absent"
-            recs = f'<div class="rec">Domaine: {dmarc["domain"]}</div>'
-        
-        st.markdown(f"""
-        <div class="sec-card {border}">
-            <h4><span class="sec-icon">{icon}</span> DMARC — Domain-based Message Authentication</h4>
-            <div class="stat" style="color:{color}">{stat}</div>
-            {recs}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # ─── SCORE ───
-        if score >= 4: sc_cls, sc_lbl = "great", "🔒 Excellent"
-        elif score >= 2: sc_cls, sc_lbl = "ok", "⚠️ Correct"
-        else: sc_cls, sc_lbl = "bad", "❌ Insuffisant"
-        
-        st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:1rem;margin-top:1rem;">
-            <div class="score-pill {sc_cls}">📊 {score} / 4</div>
-            <span style="color:#667a99;">Sécurité email pour <strong style="color:#c0cfe0;">{domain}</strong></span>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.caption(f"Analyse terminée · {datetime.now().strftime('%H:%M:%S')}")
+        with st.expander("📋 Tableau détaillé"):
+            dat = [{"Résolveur": n, "IP": ip, "Résultat": (r["records"][0] if r["records"] else r.get("error","?")) + (f" +{len(r['records'])-1}" if r["records"] and len(r["records"])>1 else ""),
+                    "OK": r["error"] is None and bool(r["records"])}
+                   for n, ip, r in results]
+            st.dataframe(pd.DataFrame(dat), use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4: BLACKLISTS
+# TAB 4: EMAIL SECURITY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab4:
-    st.markdown("---")
-    col_ip, col_dom, col_bb = st.columns([2.5, 2.5, 1])
-    with col_ip:
-        bl_ip = st.text_input("Adresse IP", placeholder="ex: 1.2.3.4", key="bl_ip", label_visibility="collapsed")
-    with col_dom:
-        bl_domain = st.text_input("Ou domaine → résoudre", placeholder="ex: google.com", key="bl_domain", label_visibility="collapsed")
-    with col_bb:
-        bl_btn = st.button("🚫 Vérifier", key="bl_btn", use_container_width=True)
+    # Show quick scan results if available
+    if st.session_state.results_email and st.session_state.active_domain:
+        email = st.session_state.results_email
+        domain = st.session_state.active_domain
+        st.success(f"📋 Résultats du scan rapide pour **{domain}**")
+        
+        score = 0
+        if email["mx"]["mx_records"]: score += 1
+        if email["spf"]["has_spf"] and email["spf"]["all_mechanism"]: score += 1
+        if email["dkim"]["has_dkim"]: score += 1
+        if email["dmarc"]["has_dmarc"] and ("reject" in email["dmarc"]["policy"].lower() or "quarantine" in email["dmarc"]["policy"].lower()): score += 1
+        
+        sc = "high" if score>=4 else "med" if score>=2 else "low"
+        st.markdown(f'<div class="score-badge {sc}">📊 Score : {score}/4</div>', unsafe_allow_html=True)
+        
+        def sec_card(title, icon, ok, details, extra=""):
+            cls = "ok" if ok else "fail"
+            color = "#4ade80" if ok else "#f87171"
+            status = "✅ OK" if ok else "❌ Non configuré"
+            lines = "".join(f'<div class="d">{d}</div>' for d in details[:3])
+            if extra: lines += f'<div class="d mute">{extra}</div>'
+            return f'<div class="sec {cls}"><h4>{icon} {title}</h4><div class="s" style="color:{color}">{status}</div>{lines}</div>'
+        
+        mx = email["mx"]
+        mx_ok = bool(mx["mx_records"])
+        mx_details = [f"Priorité {p} → {h}" for p,h in mx["mx_records"][:5]]
+        st.markdown(sec_card("MX — Serveurs mail", "📨", mx_ok, mx_details), unsafe_allow_html=True)
+        
+        spf = email["spf"]
+        spf_ok = spf["has_spf"]
+        mech = "🔒 Hard Fail" if spf["all_mechanism"] else "⚠️ Soft Fail" if spf["soft_all"] else ""
+        spf_details = spf["spf_records"]
+        st.markdown(sec_card(f"SPF {'· '+mech if mech else ''}", "🛡️", spf_ok, spf_details), unsafe_allow_html=True)
+        
+        dkim = email["dkim"]
+        dkim_ok = dkim["has_dkim"]
+        dkim_details = dkim["dkim_records"] or [f"Domaine: {dkim['domain']}"]
+        extra = "Essayez: google, selector1, s1, mail" if not dkim_ok else ""
+        st.markdown(sec_card("DKIM", "🔑", dkim_ok, dkim_details, extra), unsafe_allow_html=True)
+        
+        dmarc = email["dmarc"]
+        dmarc_ok = dmarc["has_dmarc"]
+        dmarc_details = dmarc["dmarc_records"] or [f"Domaine: {dmarc['domain']}"]
+        st.markdown(sec_card(f"DMARC · {dmarc['policy']}" if dmarc_ok else "DMARC", "📋", dmarc_ok, dmarc_details), unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.markdown('<div style="color:#94a3b8;font-size:0.8rem;">Analyse manuelle ci-dessous si besoin ↓</div>', unsafe_allow_html=True)
     
-    if bl_domain and not bl_ip:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Analyse manuelle de la sécurité email</div>', unsafe_allow_html=True)
+    col_ed, col_es, col_eb = st.columns([2.5, 1.5, 1])
+    with col_ed:
+        edom = st.text_input("Domaine", placeholder="cortechs.fr", key="em_domain", label_visibility="collapsed")
+    with col_es:
+        sel = st.text_input("Sélecteur DKIM", value="default", key="em_sel", label_visibility="collapsed")
+    with col_eb:
+        ebtn = st.button("🔒 Analyser", key="em_btn", use_container_width=True)
+    
+    if ebtn and edom:
+        dom = edom.strip(); selector = sel.strip() or "default"
+        with st.spinner(f"Analyse de {dom}..."):
+            mx = DNSEngine.query_mx(dom); spf = DNSEngine.check_spf(dom)
+            dkim = DNSEngine.check_dkim(dom, selector); dmarc = DNSEngine.check_dmarc(dom)
+        
+        score = 0
+        if mx["mx_records"]: score += 1
+        if spf["has_spf"] and spf["all_mechanism"]: score += 1
+        if dkim["has_dkim"]: score += 1
+        if dmarc["has_dmarc"] and ("reject" in dmarc["policy"].lower() or "quarantine" in dmarc["policy"].lower()): score += 1
+        
+        sc = "high" if score>=4 else "med" if score>=2 else "low"
+        st.markdown(f'<div class="score-badge {sc}">📊 {score}/4</div>', unsafe_allow_html=True)
+        
+        def sc2(title, icon, ok, details, extra=""):
+            cls = "ok" if ok else "fail"; color = "#4ade80" if ok else "#f87171"
+            sts = "✅" if ok else "❌"
+            lines = "".join(f'<div class="d">{d}</div>' for d in details[:3])
+            if extra: lines += f'<div class="d mute">{extra}</div>'
+            st.markdown(f'<div class="sec {cls}"><h4>{icon} {title}</h4><div class="s" style="color:{color}">{sts}</div>{lines}</div>', unsafe_allow_html=True)
+        
+        sc2("MX", "📨", bool(mx["mx_records"]), [f"P{p} → {h}" for p,h in mx["mx_records"][:5]])
+        mech = "🔒 Hard Fail" if spf["all_mechanism"] else "⚠️ Soft Fail" if spf["soft_all"] else ""
+        sc2(f"SPF {mech}", "🛡️", spf["has_spf"], spf["spf_records"])
+        sc2("DKIM", "🔑", dkim["has_dkim"], dkim["dkim_records"] or [f"{dkim['domain']}"], "Essayez: google, selector1" if not dkim["has_dkim"] else "")
+        sc2("DMARC · "+dmarc["policy"] if dmarc["has_dmarc"] else "DMARC", "📋", dmarc["has_dmarc"], dmarc["dmarc_records"] or [f"{dmarc['domain']}"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 5: BLACKLISTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab5:
+    if st.session_state.results_bl and st.session_state.active_domain:
+        bl = st.session_state.results_bl
+        listed = sum(1 for r in bl["results"].values() if r["listed"])
+        st.info(f"📋 Scan rapide : IP **{bl['ip']}** — {listed}/{len(bl['results'])} listé")
+    
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Vérifie si une IP est listée sur 12 blacklists DNS</div>', unsafe_allow_html=True)
+    col_ip, col_dm, col_bb = st.columns([2, 2, 1])
+    with col_ip:
+        bip = st.text_input("Adresse IP", placeholder="1.2.3.4", key="bl_ip", label_visibility="collapsed")
+    with col_dm:
+        bdom = st.text_input("Ou résoudre un domaine", placeholder="google.com", key="bl_dom2", label_visibility="collapsed")
+    with col_bb:
+        bbtn = st.button("🚫 Vérifier", key="bl_btn2", use_container_width=True)
+    
+    if bdom and not bip:
         try:
-            resolved = socket.gethostbyname(bl_domain.strip())
-            if resolved: bl_ip = resolved
+            resolved = socket.gethostbyname(bdom.strip())
+            if resolved: bip = resolved
         except: pass
     
-    if bl_btn and bl_ip:
-        ip = bl_ip.strip()
-        parts = ip.split(".")
-        if len(parts) != 4 or not all(p.isdigit() for p in parts):
-            st.error("Format IP invalide. Exemple: 1.2.3.4")
+    if bbtn and bip:
+        ip = bip.strip()
+        if len(ip.split(".")) != 4 or not all(p.isdigit() for p in ip.split(".")):
+            st.error("IP invalide — format: 1.2.3.4")
         else:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
+            bar = st.progress(0); txt = st.empty()
             results = {}
             total = len(DNS_BLACKLISTS)
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
                 import dns.resolver as dnsr
-                reversed_ip = ".".join(reversed(ip.split(".")))
-                futures = {}
-                
+                rip = ".".join(reversed(ip.split(".")))
+                futs = {}
                 for name, zone in DNS_BLACKLISTS.items():
-                    qname = f"{reversed_ip}.{zone}"
-                    def do_query(qn=qname):
+                    q = f"{rip}.{zone}"
+                    def dq(qn=q):
                         try:
-                            r = dnsr.Resolver(); r.timeout = 4; r.lifetime = 4
-                            ans = r.resolve(qn, "A")
-                            return {"listed": True, "response": str(ans[0]), "status": "⚠️ LISTÉE"}
-                        except dnsr.NXDOMAIN:
-                            return {"listed": False, "response": "NXDOMAIN", "status": "✅ Clean"}
-                        except dnsr.Timeout:
-                            return {"listed": False, "response": "Timeout", "status": "⏱ Timeout"}
-                        except Exception as e:
-                            return {"listed": False, "response": str(e)[:50], "status": "❓ Inconnu"}
-                    futures[executor.submit(do_query)] = name
+                            rx = dnsr.Resolver(); rx.timeout=3; rx.lifetime=3
+                            ans = rx.resolve(qn, "A")
+                            return {"listed": True, "resp": str(ans[0])}
+                        except dnsr.NXDOMAIN: return {"listed": False, "resp": "NXDOMAIN"}
+                        except: return {"listed": False, "resp": "?"}
+                    futs[ex.submit(dq)] = name
                 
-                for i, future in enumerate(concurrent.futures.as_completed(futures), 1):
-                    name = futures[future]
-                    try: results[name] = future.result(timeout=5)
-                    except: results[name] = {"listed": False, "response": "Exception", "status": "❓ Inconnu"}
-                    progress_bar.progress(i / total)
-                    status_text.text(f"⏳ {i}/{total} blacklists...")
+                for i, f in enumerate(concurrent.futures.as_completed(futs), 1):
+                    name = futs[f]
+                    try: results[name] = f.result(timeout=5)
+                    except: results[name] = {"listed": False, "resp": "?"}
+                    bar.progress(i/total); txt.text(f"{i}/{total}")
             
-            progress_bar.empty(); status_text.empty()
+            bar.empty(); txt.empty()
+            listed = sum(1 for r in results.values() if r["listed"])
+            clean = sum(1 for r in results.values() if not r["listed"] and r["resp"]=="NXDOMAIN")
             
-            listed_count = sum(1 for r in results.values() if r["listed"])
-            clean_count = sum(1 for r in results.values() if r["status"] == "✅ Clean")
-            
-            # Metrics
             cm1, cm2, cm3 = st.columns(3)
             with cm1:
-                c = "red" if listed_count else "green"
-                st.markdown(f'<div class="ktile"><div class="big {c}">{listed_count}/{total}</div><div class="lbl">Blacklists</div></div>', unsafe_allow_html=True)
+                c = "r" if listed else "g"
+                st.markdown(f'<div class="kpi"><div class="num {c}">{listed}/{total}</div><div class="lbl">Listé</div></div>', unsafe_allow_html=True)
             with cm2:
-                st.markdown(f'<div class="ktile"><div class="big green">{clean_count}</div><div class="lbl">Clean ✅</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi"><div class="num g">{clean}</div><div class="lbl">Clean</div></div>', unsafe_allow_html=True)
             with cm3:
-                st.markdown(f'<div class="ktile"><div class="big gold">{total - listed_count - clean_count}</div><div class="lbl">Timeout / Inconnu</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi"><div class="num y">{total-listed-clean}</div><div class="lbl">Inconnu</div></div>', unsafe_allow_html=True)
             
-            # Chips
-            chips_html = ""
+            pills = '<div class="bl-row">'
             for name, r in sorted(results.items(), key=lambda x: (not x[1]["listed"], x[0])):
-                if r["listed"]: cls = "listed"
-                elif r["status"] == "✅ Clean": cls = "clean"
-                else: cls = "unknown"
-                chips_html += f'<span class="bl-chip {cls}" title="{r["response"]}">{name} · {r["status"]}</span>'
-            st.markdown(f'<div style="margin:1rem 0;">{chips_html}</div>', unsafe_allow_html=True)
+                cls = "listed" if r["listed"] else "clean" if r["resp"]=="NXDOMAIN" else "unknown"
+                icon = "⚠️" if r["listed"] else "✅" if r["resp"]=="NXDOMAIN" else "⏱"
+                pills += f'<span class="bl-pill {cls}">{icon} {name}</span>'
+            pills += '</div>'
+            st.markdown(pills, unsafe_allow_html=True)
             
-            if listed_count == 0:
-                st.success(f"✅ **{ip}** est propre — aucune blacklist")
+            if listed:
+                st.error(f"⚠️ {ip} listée sur **{listed}/{total}** blacklists")
             else:
-                st.error(f"⚠️ **{ip}** listée sur **{listed_count}/{total}** blacklists !")
+                st.success(f"✅ {ip} est propre")
             
-            # Expander with details
-            with st.expander("📋 Voir le tableau détaillé"):
-                data = [{"Blacklist": n, "Statut": r["status"], "Réponse": r["response"], "Listé": "OUI" if r["listed"] else "Non"}
-                        for n, r in sorted(results.items(), key=lambda x: (not x[1]["listed"], x[0]))]
-                st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
-            
-            st.caption(f"IP : **{ip}** · {datetime.now().strftime('%H:%M:%S')}")
+            with st.expander("📋 Détails"):
+                dat = [{"Blacklist": n, "Listé": "OUI" if r["listed"] else "Non", "Réponse": r["resp"]}
+                       for n, r in sorted(results.items(), key=lambda x: (not x[1]["listed"], x[0]))]
+                st.dataframe(pd.DataFrame(dat), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 6: WHOIS & GEO-IP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab6:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">WHOIS + géolocalisation IP</div>', unsafe_allow_html=True)
+    
+    col_w, col_g = st.columns(2)
+    
+    with col_w:
+        st.markdown("#### 📋 WHOIS")
+        w_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="whois_domain", label_visibility="collapsed")
+        if st.button("🔍 WHOIS", key="whois_btn", use_container_width=True):
+            if w_domain:
+                with st.spinner(f"Recherche WHOIS pour {w_domain}..."):
+                    w = get_whois(w_domain.strip(), timeout=15)
+                
+                if w["error"]:
+                    st.error(w["error"])
+                else:
+                    # Info cards
+                    items = []
+                    if w.get("registrar"):
+                        items.append(("Bureau d'enregistrement", w["registrar"]))
+                    if w.get("creation_date"):
+                        items.append(("Date de création", w["creation_date"]))
+                    if w.get("expiration_date"):
+                        items.append(("Expiration", w["expiration_date"]))
+                    if w.get("name_servers"):
+                        items.append(("Serveurs DNS", ", ".join(w["name_servers"][:6])))
+                    if w.get("status"):
+                        items.append(("Statut", ", ".join(w["status"][:4])))
+                    
+                    for label, value in items:
+                        st.markdown(f'<div style="background:#0d1a2d;border:1px solid #152540;border-radius:8px;padding:0.6rem 1rem;margin-bottom:4px;"><span style="color:#94a3b8;font-size:0.75rem;">{label}</span><br><span style="color:#e2e8f0;font-size:0.85rem;word-break:break-all;">{value}</span></div>', unsafe_allow_html=True)
+                    
+                    # Raw expander
+                    with st.expander("📋 Données brutes WHOIS"):
+                        st.code(w["raw"][:5000] if w["raw"] else "N/A", language="text")
+    
+    with col_g:
+        st.markdown("#### 📍 Géolocalisation IP")
+        g_target = st.text_input("IP ou domaine", placeholder="8.8.8.8 ou google.com", key="geo_target", label_visibility="collapsed")
+        if st.button("📍 Localiser", key="geo_btn", use_container_width=True):
+            if g_target:
+                with st.spinner(f"Géolocalisation de {g_target}..."):
+                    geo_data = resolve_and_geo(g_target.strip())
+                
+                if geo_data["error"]:
+                    st.error(geo_data["error"])
+                else:
+                    for entry in geo_data["ips"]:
+                        ip = entry["ip"]
+                        g = entry["geo"]
+                        
+                        if g.get("error"):
+                            st.warning(f"{ip}: {g['error']}")
+                            continue
+                        
+                        # Location card
+                        flag = g.get("country_code", "").lower()
+                        flag_emoji = "".join(chr(0x1F1E6 + ord(c) - ord('a')) for c in flag) if len(flag) == 2 else "🌐"
+                        location = f"{g.get('city','')}, {g.get('region','')}, {g.get('country','')}"
+                        location = location.strip(", ")
+                        
+                        st.markdown(f"""
+                        <div style="background:#0d1a2d;border:1px solid #152540;border-radius:10px;padding:1rem;margin-bottom:8px;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;">
+                                <span style="font-size:1.5rem;">{flag_emoji}</span>
+                                <span style="color:#e2e8f0;font-weight:700;font-size:1rem;">{ip}</span>
+                            </div>
+                            <div style="color:#e2e8f0;font-size:0.9rem;">📍 {location}</div>
+                            <div style="color:#94a3b8;font-size:0.8rem;margin-top:4px;">ISP: {g.get('isp','N/A')}</div>
+                            <div style="color:#94a3b8;font-size:0.75rem;">Org: {g.get('org','N/A')} · TZ: {g.get('timezone','N/A')}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Mini map
+                        if g.get("lat") and g.get("lon"):
+                            fig = go.Figure(go.Scattergeo(
+                                lon=[g["lon"]], lat=[g["lat"]],
+                                mode="markers",
+                                marker=dict(size=14, color="#c9a94e", line=dict(width=2, color="#0a1628")),
+                                text=f"{ip}<br>{location}", hoverinfo="text"
+                            ))
+                            fig.update_layout(
+                                geo=dict(projection_type="natural earth", showland=True,
+                                    landcolor="#0d1a2d", showocean=True, oceancolor="#070d16",
+                                    showcountries=True, countrycolor="#152540", coastlinecolor="#152540",
+                                    showframe=False, bgcolor="#070d16"),
+                                paper_bgcolor="#070d16", plot_bgcolor="#070d16",
+                                margin=dict(l=5,r=5,t=5,b=5), height=200, showlegend=False, dragmode=False
+                            )
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 # ─── FOOTER ──────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
-<div class="footer">
-    DNS CHECKER v2.0 · Cortechs © 2026 · 
-    {len(GLOBAL_RESOLVERS)} résolveurs · {len(DNS_BLACKLISTS)} blacklists · 
-    CT 115 (192.168.17.35:8506)
+<div class="foot">
+    DNS CHECKER v3.0 · Cortechs © 2026 · CT 115 (192.168.17.35:8506) · {len(GLOBAL_RESOLVERS)} résolveurs · {len(DNS_BLACKLISTS)} blacklists
 </div>
 """, unsafe_allow_html=True)
