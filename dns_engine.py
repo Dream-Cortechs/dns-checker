@@ -19,33 +19,35 @@ RECORD_TYPES = ["A", "AAAA", "MX", "CNAME", "TXT", "NS", "SOA", "PTR", "SRV", "C
 
 # Résolveurs publics mondiaux pour le test de propagation
 GLOBAL_RESOLVERS = {
+    # Amérique du Nord
     "Google 🇺🇸": "8.8.8.8",
     "Google (alt) 🇺🇸": "8.8.4.4",
     "Cloudflare 🇺🇸": "1.1.1.1",
     "Cloudflare (alt) 🇺🇸": "1.0.0.1",
     "Quad9 🇺🇸": "9.9.9.9",
-    "OpenDNS 🇺🇸": "208.67.222.222",
-    "OpenDNS (alt) 🇺🇸": "208.67.220.220",
     "Level3 🇺🇸": "4.2.2.2",
-    "Verisign 🇺🇸": "64.6.64.6",
     "Norton 🇺🇸": "199.85.126.10",
     "Neustar 🇺🇸": "156.154.70.1",
     "Dyn 🇺🇸": "216.146.35.35",
+    "Hurricane Elec 🇺🇸": "74.82.42.42",
+    "CenturyLink 🇺🇸": "205.171.3.65",
+    "ControlD 🇨🇦": "76.76.2.0",
+    
+    # Europe
     "Quad9 🇨🇭": "149.112.112.112",
+    "Quad9 (alt) 🇨🇭": "149.112.112.10",
     "AdGuard 🇩🇪": "94.140.14.14",
-    "DNS.WATCH 🇩🇪": "84.200.69.80",
-    "Freenom 🇫🇷": "80.80.80.80",
     "Freenom (alt) 🇫🇷": "80.80.81.81",
-    "FDN 🇫🇷": "80.67.169.12",
-    "CensurfriDNS 🇩🇪": "91.239.100.100",
-    "UncensoredDNS 🇩🇰": "91.239.100.100",
+    "NextDNS 🇦🇹": "45.90.28.0",
+    "dnsforge 🇩🇪": "176.9.93.198",
+    "OpenNIC 🇩🇪": "94.247.43.254",
+    "CleanBrowsing 🇬🇧": "185.228.168.9",
+    "SafeDNS 🇺🇸": "195.46.39.39",
+    
+    # Asie / Océanie
     "Comodo 🇭🇰": "8.26.56.26",
     "Yandex 🇷🇺": "77.88.8.8",
     "AliDNS 🇨🇳": "223.5.5.5",
-    "CleanBrowsing 🇬🇧": "185.228.168.9",
-    "SafeDNS 🇺🇸": "195.46.39.39",
-    "Alternate DNS 🇨🇭": "76.76.19.19",
-    "OpenNIC 🇺🇸": "192.71.245.208",
 }
 
 DNS_BLACKLISTS = {
