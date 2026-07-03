@@ -497,7 +497,7 @@ with tab2:
             else:
                 return "color: #e74c3c"
         
-        styled_df = df.style.applymap(color_status, subset=["Statut"])
+        styled_df = df.style.map(color_status, subset=["Statut"])
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=min(35 * len(data) + 38, 600))
         
         st.caption(f"Domaine : **{prop_domain}** | Type : **{prop_type}** | Consensus : **{consensus_pct:.0f}%** | {datetime.now().strftime('%H:%M:%S')}")
@@ -799,7 +799,7 @@ with tab4:
                     return "color: #e74c3c; font-weight: 700"
                 return "color: #e0e0e0"
             
-            styled_df = df.style.applymap(color_listed, subset=["Listé"])
+            styled_df = df.style.map(color_listed, subset=["Listé"])
             st.dataframe(styled_df, use_container_width=True, hide_index=True, 
                         height=min(35 * len(data) + 38, 500))
             
