@@ -21,6 +21,40 @@ from dns_engine import (
     HAS_DNSPYTHON
 )
 
+import plotly.graph_objects as go
+
+# ─── Geo coordinates for propagation map ────────────────────────────────────
+
+RESOLVER_GEO = {
+    "Google 🇺🇸": (37.42, -122.08),        # Mountain View, CA
+    "Google (alt) 🇺🇸": (37.42, -122.06),  # Mountain View (offset)
+    "Cloudflare 🇺🇸": (37.77, -122.42),     # San Francisco
+    "Cloudflare (alt) 🇺🇸": (37.77, -122.39), # San Francisco (offset)
+    "Quad9 🇺🇸": (37.44, -122.14),          # Palo Alto
+    "OpenDNS 🇺🇸": (37.34, -121.89),        # San Jose
+    "OpenDNS (alt) 🇺🇸": (37.34, -121.87),
+    "Level3 🇺🇸": (39.74, -104.99),         # Denver
+    "Verisign 🇺🇸": (38.96, -77.36),        # Reston, VA
+    "Norton 🇺🇸": (37.39, -122.08),         # Mountain View
+    "Neustar 🇺🇸": (39.01, -77.43),         # Sterling, VA
+    "Dyn 🇺🇸": (42.99, -71.46),             # Manchester, NH
+    "Quad9 🇨🇭": (47.38, 8.54),             # Zurich
+    "AdGuard 🇩🇪": (50.11, 8.68),           # Frankfurt
+    "DNS.WATCH 🇩🇪": (50.11, 8.69),
+    "Freenom 🇫🇷": (48.86, 2.35),           # Paris
+    "Freenom (alt) 🇫🇷": (48.86, 2.37),
+    "FDN 🇫🇷": (48.86, 2.33),
+    "CensurfriDNS 🇩🇪": (52.52, 13.40),     # Berlin
+    "UncensoredDNS 🇩🇰": (55.68, 12.57),    # Copenhagen
+    "Comodo 🇭🇰": (22.32, 114.17),          # Hong Kong
+    "Yandex 🇷🇺": (55.75, 37.62),           # Moscow
+    "AliDNS 🇨🇳": (30.27, 120.15),          # Hangzhou
+    "CleanBrowsing 🇬🇧": (51.51, -0.13),    # London
+    "SafeDNS 🇺🇸": (38.91, -77.04),         # Washington DC
+    "Alternate DNS 🇨🇭": (46.20, 6.14),     # Geneva
+    "OpenNIC 🇺🇸": (40.71, -74.01),         # NYC
+}
+
 # ─── Page Config ────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -487,6 +521,54 @@ with tab2:
                 <div class="label">Valeur majoritaire</div>
             </div>
             """, unsafe_allow_html=True)
+        
+        # 🌍 World map
+        map_lats, map_lons, map_colors, map_texts, map_sizes = [], [], [], [], []
+        for name, ip, result in results:
+            geo = RESOLVER_GEO.get(name)
+            if geo:
+                map_lats.append(geo[0])
+                map_lons.append(geo[1])
+                if result["error"] is None and result["records"]:
+                    map_colors.append("#2ecc71")
+                    map_sizes.append(12)
+                elif result["error"] is None:
+                    map_colors.append("#f39c12")
+                    map_sizes.append(10)
+                else:
+                    map_colors.append("#e74c3c")
+                    map_sizes.append(10)
+                first_rec = result["records"][0] if result["records"] else (result["error"] or "?")
+                map_texts.append(f"{name}<br>{ip}<br>{first_rec}")
+        
+        if map_lats:
+            fig = go.Figure()
+            fig.add_trace(go.Scattergeo(
+                lon=map_lons, lat=map_lats,
+                mode="markers",
+                marker=dict(size=map_sizes, color=map_colors, line=dict(width=1, color="#0a1628")),
+                text=map_texts,
+                hoverinfo="text",
+                name="Résolveurs"
+            ))
+            fig.update_layout(
+                geo=dict(
+                    projection_type="natural earth",
+                    showland=True, landcolor="#111d34",
+                    showocean=True, oceancolor="#0a1628",
+                    showcountries=True, countrycolor="#1e3050",
+                    coastlinecolor="#1e3050",
+                    showframe=False,
+                    bgcolor="#0a1628",
+                ),
+                paper_bgcolor="#0a1628",
+                plot_bgcolor="#0a1628",
+                margin=dict(l=5, r=5, t=5, b=5),
+                height=400,
+                showlegend=False,
+                dragmode=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         
         # Color-code the dataframe
         def color_status(val):
