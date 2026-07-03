@@ -221,15 +221,18 @@ st.markdown("""
 
 # ─── HEADER ─────────────────────────────────────────────────────────────────
 
-st.markdown("""
-<div class="topbar">
-    <img src="/app/static/cortechs-logo.png" style="height:44px;margin-right:0.8rem;">
-    <div>
-        <h1>DNS CHECKER</h1>
-        <div class="tagline">Diagnostic DNS mondial · Simple, rapide, complet</div>
+col_logo, col_title = st.columns([0.07, 0.93])
+with col_logo:
+    st.image("/opt/dns-checker/static/cortechs-logo.png", width=52)
+with col_title:
+    st.markdown("""
+    <div style="padding-top:0.3rem;">
+        <span style="color:#c9a94e;font-size:1.5rem;font-weight:700;">DNS CHECKER</span><br>
+        <span style="color:#5a7090;font-size:0.8rem;">Diagnostic DNS mondial · Simple, rapide, complet</span>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+st.markdown('<div style="height:3px;background:linear-gradient(90deg, #c9a94e, #1a3050);margin:0.8rem 0 1.2rem 0;"></div>', unsafe_allow_html=True)
 
 # ─── STAT PILLS ─────────────────────────────────────────────────────────────
 
