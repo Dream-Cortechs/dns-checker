@@ -21,6 +21,7 @@ from dns_engine import (
 )
 from report import generate_report_pdf
 from whois_geo import get_whois, get_geoip, resolve_and_geo
+from subdomains import discover_subdomains
 import plotly.graph_objects as go
 
 # ─── Geo ────────────────────────────────────────────────────────────────────
@@ -345,9 +346,9 @@ with st.sidebar:
 
 # ─── TABS ───────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🏠  Accueil", "🔍  DNS Lookup", "🌍  Propagation", "📧  Sécurité Email", "🚫  Blacklists",
-    "🌐  Whois & Géo"
+    "📋  WHOIS", "📍  Géo IP", "🔎  Sous-domaines"
 ])
 
 
@@ -791,99 +792,145 @@ with tab5:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 6: WHOIS & GEO-IP
+# TAB 6: WHOIS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab6:
-    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">WHOIS + géolocalisation IP</div>', unsafe_allow_html=True)
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Recherche WHOIS — informations d\'enregistrement de domaine</div>', unsafe_allow_html=True)
     
-    col_w, col_g = st.columns(2)
+    w_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="whois_domain")
     
-    with col_w:
-        st.markdown("#### 📋 WHOIS")
-        w_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="whois_domain", label_visibility="collapsed")
-        if st.button("🔍 WHOIS", key="whois_btn", use_container_width=True):
-            if w_domain:
-                with st.spinner(f"Recherche WHOIS pour {w_domain}..."):
-                    w = get_whois(w_domain.strip(), timeout=15)
+    if st.button("🔍 WHOIS", key="whois_btn", use_container_width=True):
+        if w_domain:
+            with st.spinner(f"Recherche WHOIS pour {w_domain}..."):
+                w = get_whois(w_domain.strip(), timeout=15)
+            
+            if w["error"]:
+                st.error(w["error"])
+            else:
+                items = []
+                if w.get("registrar"):
+                    items.append(("Bureau d'enregistrement", w["registrar"]))
+                if w.get("creation_date"):
+                    items.append(("Date de création", w["creation_date"]))
+                if w.get("expiration_date"):
+                    items.append(("Expiration", w["expiration_date"]))
+                if w.get("name_servers"):
+                    items.append(("Serveurs DNS", ", ".join(w["name_servers"][:6])))
+                if w.get("status"):
+                    items.append(("Statut", ", ".join(w["status"][:4])))
                 
-                if w["error"]:
-                    st.error(w["error"])
-                else:
-                    # Info cards
-                    items = []
-                    if w.get("registrar"):
-                        items.append(("Bureau d'enregistrement", w["registrar"]))
-                    if w.get("creation_date"):
-                        items.append(("Date de création", w["creation_date"]))
-                    if w.get("expiration_date"):
-                        items.append(("Expiration", w["expiration_date"]))
-                    if w.get("name_servers"):
-                        items.append(("Serveurs DNS", ", ".join(w["name_servers"][:6])))
-                    if w.get("status"):
-                        items.append(("Statut", ", ".join(w["status"][:4])))
-                    
-                    for label, value in items:
-                        st.markdown(f'<div style="background:#0d1a2d;border:1px solid #152540;border-radius:8px;padding:0.6rem 1rem;margin-bottom:4px;"><span style="color:#94a3b8;font-size:0.75rem;">{label}</span><br><span style="color:#e2e8f0;font-size:0.85rem;word-break:break-all;">{value}</span></div>', unsafe_allow_html=True)
-                    
-                    # Raw expander
-                    with st.expander("📋 Données brutes WHOIS"):
-                        st.code(w["raw"][:5000] if w["raw"] else "N/A", language="text")
-    
-    with col_g:
-        st.markdown("#### 📍 Géolocalisation IP")
-        g_target = st.text_input("IP ou domaine", placeholder="8.8.8.8 ou google.com", key="geo_target", label_visibility="collapsed")
-        if st.button("📍 Localiser", key="geo_btn", use_container_width=True):
-            if g_target:
-                with st.spinner(f"Géolocalisation de {g_target}..."):
-                    geo_data = resolve_and_geo(g_target.strip())
+                for label, value in items:
+                    st.markdown(f'<div style="background:#0d1a2d;border:1px solid #152540;border-radius:8px;padding:0.7rem 1rem;margin-bottom:5px;"><span style="color:#94a3b8;font-size:0.75rem;">{label}</span><br><span style="color:#e2e8f0;font-size:0.85rem;word-break:break-all;">{value}</span></div>', unsafe_allow_html=True)
                 
-                if geo_data["error"]:
-                    st.error(geo_data["error"])
-                else:
-                    for entry in geo_data["ips"]:
-                        ip = entry["ip"]
-                        g = entry["geo"]
-                        
-                        if g.get("error"):
-                            st.warning(f"{ip}: {g['error']}")
-                            continue
-                        
-                        # Location card
-                        flag = g.get("country_code", "").lower()
-                        flag_emoji = "".join(chr(0x1F1E6 + ord(c) - ord('a')) for c in flag) if len(flag) == 2 else "🌐"
-                        location = f"{g.get('city','')}, {g.get('region','')}, {g.get('country','')}"
-                        location = location.strip(", ")
-                        
-                        st.markdown(f"""
-                        <div style="background:#0d1a2d;border:1px solid #152540;border-radius:10px;padding:1rem;margin-bottom:8px;">
-                            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;">
-                                <span style="font-size:1.5rem;">{flag_emoji}</span>
-                                <span style="color:#e2e8f0;font-weight:700;font-size:1rem;">{ip}</span>
-                            </div>
-                            <div style="color:#e2e8f0;font-size:0.9rem;">📍 {location}</div>
-                            <div style="color:#94a3b8;font-size:0.8rem;margin-top:4px;">ISP: {g.get('isp','N/A')}</div>
-                            <div style="color:#94a3b8;font-size:0.75rem;">Org: {g.get('org','N/A')} · TZ: {g.get('timezone','N/A')}</div>
+                with st.expander("📋 Données brutes WHOIS"):
+                    st.code(w["raw"][:5000] if w["raw"] else "N/A", language="text")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 7: GEO IP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab7:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Géolocalisation d\'une adresse IP ou d\'un domaine</div>', unsafe_allow_html=True)
+    
+    g_target = st.text_input("IP ou domaine", placeholder="8.8.8.8 ou google.com", key="geo_target")
+    
+    if st.button("📍 Localiser", key="geo_btn", use_container_width=True):
+        if g_target:
+            with st.spinner(f"Géolocalisation de {g_target}..."):
+                geo_data = resolve_and_geo(g_target.strip())
+            
+            if geo_data["error"]:
+                st.error(geo_data["error"])
+            else:
+                for entry in geo_data["ips"]:
+                    ip = entry["ip"]
+                    g = entry["geo"]
+                    
+                    if g.get("error"):
+                        st.warning(f"{ip}: {g['error']}")
+                        continue
+                    
+                    flag = g.get("country_code", "").lower()
+                    flag_emoji = "".join(chr(0x1F1E6 + ord(c) - ord('a')) for c in flag) if len(flag) == 2 else "🌐"
+                    location = f"{g.get('city','')}, {g.get('region','')}, {g.get('country','')}"
+                    location = location.strip(", ")
+                    
+                    st.markdown(f"""
+                    <div style="background:#0d1a2d;border:1px solid #152540;border-radius:10px;padding:1rem;margin-bottom:8px;">
+                        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;">
+                            <span style="font-size:1.5rem;">{flag_emoji}</span>
+                            <span style="color:#e2e8f0;font-weight:700;font-size:1rem;">{ip}</span>
                         </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Mini map
-                        if g.get("lat") and g.get("lon"):
-                            fig = go.Figure(go.Scattergeo(
-                                lon=[g["lon"]], lat=[g["lat"]],
-                                mode="markers",
-                                marker=dict(size=14, color="#c9a94e", line=dict(width=2, color="#0a1628")),
-                                text=f"{ip}<br>{location}", hoverinfo="text"
-                            ))
-                            fig.update_layout(
-                                geo=dict(projection_type="natural earth", showland=True,
-                                    landcolor="#0d1a2d", showocean=True, oceancolor="#070d16",
-                                    showcountries=True, countrycolor="#152540", coastlinecolor="#152540",
-                                    showframe=False, bgcolor="#070d16"),
-                                paper_bgcolor="#070d16", plot_bgcolor="#070d16",
-                                margin=dict(l=5,r=5,t=5,b=5), height=200, showlegend=False, dragmode=False
-                            )
-                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                        <div style="color:#e2e8f0;font-size:0.9rem;">📍 {location}</div>
+                        <div style="color:#94a3b8;font-size:0.8rem;margin-top:4px;">ISP: {g.get('isp','N/A')}</div>
+                        <div style="color:#94a3b8;font-size:0.75rem;">Org: {g.get('org','N/A')} · TZ: {g.get('timezone','N/A')}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if g.get("lat") and g.get("lon"):
+                        fig = go.Figure(go.Scattergeo(
+                            lon=[g["lon"]], lat=[g["lat"]],
+                            mode="markers",
+                            marker=dict(size=14, color="#c9a94e", line=dict(width=2, color="#0a1628")),
+                            text=f"{ip}<br>{location}", hoverinfo="text"
+                        ))
+                        fig.update_layout(
+                            geo=dict(projection_type="natural earth", showland=True,
+                                landcolor="#0d1a2d", showocean=True, oceancolor="#070d16",
+                                showcountries=True, countrycolor="#152540", coastlinecolor="#152540",
+                                showframe=False, bgcolor="#070d16"),
+                            paper_bgcolor="#070d16", plot_bgcolor="#070d16",
+                            margin=dict(l=5,r=5,t=5,b=5), height=250, showlegend=False, dragmode=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 8: SUBDOMAIN DISCOVERY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab8:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Découverte de sous-domaines — brute-force DNS + Certificate Transparency (crt.sh)</div>', unsafe_allow_html=True)
+    
+    s_domain = st.text_input("Domaine racine", placeholder="cortechs.fr", key="sub_domain")
+    
+    col_s1, col_s2, col_s3 = st.columns([1.2, 1, 1])
+    with col_s1:
+        use_bf = st.checkbox("Brute-force DNS", value=True, key="sub_bf", help="Teste ~100 sous-domaines communs par DNS")
+    with col_s2:
+        use_ct = st.checkbox("Certificate Transparency (crt.sh)", value=True, key="sub_ct", help="Recherche dans les logs de certificats SSL/TLS")
+    with col_s3:
+        sub_btn = st.button("🔎 Découvrir", key="sub_btn", use_container_width=True)
+    
+    if sub_btn and s_domain:
+        with st.spinner(f"Recherche de sous-domaines pour **{s_domain}**..."):
+            r = discover_subdomains(s_domain.strip(), bruteforce=use_bf, crtsh=use_ct, timeout=25)
+        
+        if r.get("error"):
+            st.error(r["error"])
+        else:
+            st.success(f"**{r['count']}** sous-domaine(s) découvert(s)")
+            st.caption(f"Sources : {', '.join(r['sources'])}")
+            
+            if r["subdomains"]:
+                # Group by IP
+                by_ip = {}
+                for fqdn, ips in sorted(r["subdomains"].items()):
+                    ip_key = ", ".join(ips[:2])
+                    by_ip.setdefault(ip_key, []).append(fqdn)
+                
+                # Display as chips grouped by IP
+                st.markdown("### 📋 Résultats")
+                for ip_key, fqdns in sorted(by_ip.items()):
+                    st.markdown(f'<span style="color:#c9a94e;font-weight:700;font-size:0.8rem;">{ip_key}</span>', unsafe_allow_html=True)
+                    chips = ""
+                    for fqdn in sorted(fqdns):
+                        # Extract subdomain part
+                        sub = fqdn.replace("." + s_domain.strip(), "")
+                        chips += f'<span style="display:inline-block;background:#0d1a2d;border:1px solid #152540;border-radius:6px;padding:3px 10px;margin:2px;font-size:0.78rem;color:#e2e8f0;">{sub}</span>'
+                    st.markdown(f'<div style="margin-bottom:8px;">{chips}</div>', unsafe_allow_html=True)
 
 
 # ─── FOOTER ──────────────────────────────────────────────────────────────────
