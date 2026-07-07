@@ -298,19 +298,14 @@ class DNSReport(FPDF):
         self._hbar(f"Sous-domaines ({subs.get('count', 0)} decouverts)")
         self.ln(2)
         sd = subs.get("subdomains", {})
-        by_ip = {}
+        domain = subs.get("domain", "")
+        # Build table rows: one row per subdomain
+        rows = []
         for fqdn, ips in sorted(sd.items()):
-            ip_key = ", ".join(ips[:2])
-            by_ip.setdefault(ip_key, []).append(fqdn)
-        for ip_key, fqdns in sorted(by_ip.items()):
-            self.set_font(self.font_name, "B", 9)
-            self.set_text_color(*GOLD)
-            self.cell(0, 5, ip_key, new_x="LMARGIN", new_y="NEXT")
-            self.set_font(self.font_name, "", 8)
-            self.set_text_color(*DARK_TEXT)
-            names = [f.replace("." + subs.get("domain", ""), "") for f in sorted(fqdns)]
-            self.multi_cell(0, 5, ", ".join(names[:20]))
-            self.ln(2)
+            name = fqdn.replace("." + domain, "") if domain else fqdn
+            ip = ", ".join(ips[:2])
+            rows.append([ip, name])
+        self._table(["IP", "Sous-domaine"], sorted(rows, key=lambda r: r[0]), [70, 110])
 
     def blacklist_page(self):
         bl = self.results.get("blacklist", {})
