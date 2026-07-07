@@ -148,10 +148,10 @@ class DNSReport(FPDF):
         self.ln(20)
         # Summary grid — 2 columns
         secs = []
-        p = self.results.get("propagation", {})
-        e = self.results.get("email", {})
-        s = self.results.get("subdomains", {})
-        bl = self.results.get("blacklist", {})
+        p = self.results.get("propagation") or {}
+        e = self.results.get("email") or {}
+        s = self.results.get("subdomains") or {}
+        bl = self.results.get("blacklist") or {}
         if self.results.get("lookup"): secs.append(("DNS Lookup", ""))
         if p: secs.append(("Propagation", f"{p.get('success',0)}/{p.get('total',24)} OK"))
         if e: secs.append(("Securite Email", f"Score {e.get('score',0)}/4"))
@@ -183,10 +183,10 @@ class DNSReport(FPDF):
 
     def executive_summary_page(self):
         """Page de resume executif avec tableau de statut."""
-        p = self.results.get("propagation", {})
-        e = self.results.get("email", {})
-        s = self.results.get("subdomains", {})
-        bl = self.results.get("blacklist", {})
+        p = self.results.get("propagation") or {}
+        e = self.results.get("email") or {}
+        s = self.results.get("subdomains") or {}
+        bl = self.results.get("blacklist") or {}
         w = self.results.get("whois", {})
         
         self.add_page()
@@ -313,7 +313,7 @@ class DNSReport(FPDF):
         for item in prop.get("details", []):
             status_icon = "OK" if item.get("ok") else "FAIL" if item.get("error") else "EMPTY"
             name = item.get("name", "").split()[0][:22]
-            rows.append([name, item.get("ip", ""), item.get("result", "")[:38], status_icon])
+            rows.append([name, item.get("ip", ""), (item.get("result") or "")[:38], status_icon])
         self._table(headers, rows, [48, 36, 72, 22])
 
     def email_security_page(self):
@@ -389,7 +389,7 @@ class DNSReport(FPDF):
             self.ln(4)
 
     def subdomains_page(self):
-        subs = self.results.get("subdomains", {})
+        subs = self.results.get("subdomains") or {}
         if not subs or not subs.get("subdomains"): return
         self.add_page()
         self._hbar(f"Sous-domaines ({subs.get('count', 0)} decouverts)")
@@ -492,7 +492,7 @@ class DNSReport(FPDF):
         for host, cert in sorted(tls.get("certificates", {}).items()):
             days = cert.get("days_left", "?")
             days_str = f"{days}j" if isinstance(days, int) else str(days)
-            cert_rows.append([host, cert.get("issuer", "")[:40], days_str])
+            cert_rows.append([host, (cert.get("issuer") or "")[:40], days_str])
         if cert_rows:
             self.ln(4)
             self._table(["Hote", "Emetteur", "Expire"], cert_rows, [55, 90, 30])
@@ -572,7 +572,7 @@ def run_full_report(domain: str, ip: str = None) -> dict:
     
     # ─── Security Audit (DNSSEC + TLS + HTTP Headers + CAA) ───
     try:
-        subs = list(results.get("subdomains", {}).get("subdomains", {}).keys())[:15] if results.get("subdomains") else []
+        subs = list((results.get("subdomains") or {}).get("subdomains", {}).keys())[:15] if results.get("subdomains") else []
         results["security"] = run_security_audit(domain, subs)
     except:
         results["security"] = None
