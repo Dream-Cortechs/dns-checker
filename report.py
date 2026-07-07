@@ -12,6 +12,7 @@ from fpdf import FPDF
 from dns_engine import DNSEngine, GLOBAL_RESOLVERS, DNS_BLACKLISTS, RECORD_TYPES
 from whois_geo import get_whois, get_geoip, resolve_and_geo
 from subdomains import discover_subdomains
+from security import check_dnssec, check_caa, check_http_headers, scan_tls, run_security_audit
 
 # ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -426,6 +427,82 @@ class DNSReport(FPDF):
         self.set_text_color(*GRAY_TEXT)
         self.cell(0, 4, f"DNS CHECKER v3.0  |  {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Page {self.page_no()}/{{nb}}", align="C")
 
+    def security_audit_page(self):
+        sec = self.results.get("security", {})
+        if not sec: return
+        
+        dnssec = sec.get("dnssec", {})
+        caa = sec.get("caa", {})
+        headers = sec.get("http_headers", {})
+        tls = sec.get("tls", {})
+        
+        self.add_page()
+        self._hbar("Audit Securite — DNSSEC, TLS, HTTP Headers")
+        self.ln(3)
+        
+        # DNSSEC
+        self.set_font(self.font_name, "B", 11)
+        self.set_text_color(*GOLD)
+        self.cell(0, 7, "DNSSEC", new_x="LMARGIN", new_y="NEXT")
+        self.set_font(self.font_name, "", 9)
+        self.set_text_color(*GREEN if dnssec.get("signed") else YELLOW)
+        self.cell(0, 5, f"  {'Signe' if dnssec.get('signed') else 'Non signe'}", new_x="LMARGIN", new_y="NEXT")
+        for d in dnssec.get("details", []):
+            self.set_text_color(*DARK_TEXT)
+            self.cell(0, 4.5, f"  {d}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(5)
+        
+        # CAA
+        self.set_font(self.font_name, "B", 11)
+        self.set_text_color(*GOLD)
+        self.cell(0, 7, "CAA (Certificate Authority Authorization)", new_x="LMARGIN", new_y="NEXT")
+        for a in caa.get("analysis", []):
+            self.set_font(self.font_name, "", 9)
+            self.set_text_color(*DARK_TEXT)
+            self.cell(0, 5, f"  {a}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(5)
+        
+        # HTTP Headers
+        self.set_font(self.font_name, "B", 11)
+        self.set_text_color(*GOLD)
+        self.cell(0, 7, f"HTTP Security Headers ({headers.get('score', 0)}/{headers.get('max_score', 6)})", new_x="LMARGIN", new_y="NEXT")
+        for check_name, check_data in headers.get("checks", {}).items():
+            ok = check_data["ok"]
+            color = GREEN if ok else RED
+            self.set_font(self.font_name, "", 9)
+            self.set_text_color(*color)
+            icon = "OK" if ok else "FAIL"
+            self.cell(0, 5, f"  [{icon}] {check_name}: {check_data['detail']}", new_x="LMARGIN", new_y="NEXT")
+        self.ln(5)
+        
+        # TLS Certificates
+        self.set_font(self.font_name, "B", 11)
+        self.set_text_color(*GOLD)
+        ts = tls.get("summary", {})
+        self.cell(0, 7, f"Certificats TLS ({ts.get('ok', 0)}/{ts.get('total_tls_hosts', 0)} OK)", new_x="LMARGIN", new_y="NEXT")
+        
+        if tls.get("flags"):
+            for flag in tls["flags"]:
+                self.set_font(self.font_name, "", 9)
+                self.set_text_color(*RED if "CRITIQUE" in flag else YELLOW)
+                self.cell(0, 5, f"  ! {flag}", new_x="LMARGIN", new_y="NEXT")
+        
+        # Table of certs
+        cert_rows = []
+        for host, cert in sorted(tls.get("certificates", {}).items()):
+            days = cert.get("days_left", "?")
+            days_str = f"{days}j" if isinstance(days, int) else str(days)
+            cert_rows.append([host, cert.get("issuer", "")[:40], days_str])
+        if cert_rows:
+            self.ln(4)
+            self._table(["Hote", "Emetteur", "Expire"], cert_rows, [55, 90, 30])
+        
+        if tls.get("errors"):
+            self.ln(3)
+            self.set_font(self.font_name, "", 8)
+            self.set_text_color(*GRAY_TEXT)
+            self.cell(0, 5, f"Sans HTTPS: {', '.join(e['host'] for e in tls['errors'][:10])}", new_x="LMARGIN", new_y="NEXT")
+
     def build(self) -> bytes:
         self.cover_page()
         self.executive_summary_page()
@@ -435,6 +512,7 @@ class DNSReport(FPDF):
         if self.results.get("whois"): self.whois_page()
         if self.results.get("geoip"): self.geoip_page()
         if self.results.get("subdomains"): self.subdomains_page()
+        if self.results.get("security"): self.security_audit_page()
         if self.results.get("blacklist"): self.blacklist_page()
         return bytes(self.output())
 
@@ -488,11 +566,18 @@ def run_full_report(domain: str, ip: str = None) -> dict:
         if geo_ip: results["geoip"] = resolve_and_geo(geo_ip)
     except: pass
     
-    # Subdomains
+    # ─── Subdomains ───
     try: results["subdomains"] = discover_subdomains(domain, bruteforce=True, crtsh=True, timeout=20)
     except: pass
     
-    # Blacklist
+    # ─── Security Audit (DNSSEC + TLS + HTTP Headers + CAA) ───
+    try:
+        subs = list(results.get("subdomains", {}).get("subdomains", {}).keys())[:15] if results.get("subdomains") else []
+        results["security"] = run_security_audit(domain, subs)
+    except:
+        results["security"] = None
+    
+    # ─── Blacklist ───
     if ip:
         import dns.resolver as dnsr
         bl_details = []; listed = 0; reversed_ip = ".".join(reversed(ip.split(".")))
