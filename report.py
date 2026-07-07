@@ -114,47 +114,54 @@ class DNSReport(FPDF):
 
     def cover_page(self):
         self.add_page()
+        # Dark background with gold accent
         self.set_fill_color(*DARK_BG)
-        self.rect(0, 0, 210, 75, "F")
+        self.rect(0, 0, 210, 85, "F")
         self.set_fill_color(*GOLD)
-        self.rect(0, 75, 210, 3, "F")
-        self.set_y(20)
+        self.rect(0, 85, 210, 3, "F")
+        
+        self.set_y(16)
         self.set_text_color(*GOLD)
-        self.set_font(self.font_name, "B", 26)
-        self.cell(0, 10, "DNS CHECKER", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.set_font(self.font_name, "B", 24)
+        self.cell(0, 9, "DNS CHECKER", align="C", new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(180, 190, 210)
-        self.set_font(self.font_name, "", 12)
-        self.cell(0, 7, "Rapport de diagnostic DNS complet", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.ln(6)
-        # Logo Cortechs
+        self.set_font(self.font_name, "", 11)
+        self.cell(0, 6, "Rapport de diagnostic DNS", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.ln(4)
+        # Logo
         logo_path = "/opt/dns-checker/static/cortechs-logo.png"
         try:
-            self.image(logo_path, x=85, y=self.get_y(), w=40)
-            self.ln(18)
+            self.image(logo_path, x=82, y=self.get_y(), w=46)
+            self.ln(20)
         except:
-            self.ln(4)
+            self.ln(6)
+        self.set_y(max(self.get_y(), 65))
+        
         self.set_text_color(*GOLD)
-        self.set_font(self.font_name, "B", 18)
+        self.set_font(self.font_name, "B", 16)
         self.cell(0, 8, self.domain, align="C", new_x="LMARGIN", new_y="NEXT")
-        self.ln(12)
-        self.set_text_color(*GRAY_TEXT)
-        self.set_font(self.font_name, "", 10)
-        now = datetime.now().strftime("%d/%m/%Y  %H:%M")
-        self.cell(0, 6, f"Genere le {now}", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.cell(0, 6, "Cortechs (c) 2026  |  dns-checker v3.0", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.ln(12)
-        # Summary line
-        secs = []
-        if self.results.get("lookup"): secs.append("DNS")
-        if self.results.get("propagation"): secs.append("Propagation")
-        if self.results.get("email"): secs.append(f"Securite ({self.results['email'].get('score',0)}/4)")
-        if self.results.get("whois"): secs.append("WHOIS")
-        if self.results.get("geoip"): secs.append("GeoIP")
-        if self.results.get("subdomains"): secs.append(f"{self.results['subdomains'].get('count',0)} sous-domaines")
-        if self.results.get("blacklist"): secs.append(f"Blacklists ({self.results['blacklist'].get('listed',0)}/{self.results['blacklist'].get('total',12)})")
+        self.ln(8)
         self.set_text_color(*GRAY_TEXT)
         self.set_font(self.font_name, "", 9)
-        self.cell(0, 6, "  |  ".join(secs), align="C", new_x="LMARGIN", new_y="NEXT")
+        now = datetime.now().strftime("%d/%m/%Y  %H:%M")
+        self.cell(0, 5, f"Genere le {now}", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 5, "Cortechs (c) 2026  |  dns-checker v3.0", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.ln(8)
+        # Summary chips
+        secs = []
+        if self.results.get("lookup"): secs.append("DNS Lookup")
+        if self.results.get("propagation"): secs.append(f"Propagation ({self.results['propagation'].get('success',0)}/{self.results['propagation'].get('total',24)})")
+        if self.results.get("email"): secs.append(f"Securite Email ({self.results['email'].get('score',0)}/4)")
+        if self.results.get("whois"): secs.append("WHOIS")
+        if self.results.get("geoip"): secs.append("Geo-IP")
+        if self.results.get("subdomains"): secs.append(f"Sous-domaines ({self.results['subdomains'].get('count',0)})")
+        if self.results.get("blacklist"):
+            listed = self.results['blacklist'].get('listed', 0)
+            total = self.results['blacklist'].get('total', 12)
+            secs.append(f"Blacklists ({'PROPRE' if listed == 0 else f'{listed}/{total} LISTE'})")
+        self.set_text_color(*GRAY_TEXT)
+        self.set_font(self.font_name, "", 9)
+        self.cell(0, 5, "  |  ".join(secs), align="C", new_x="LMARGIN", new_y="NEXT")
 
     def dns_lookup_page(self):
         lookup = self.results.get("lookup", {})
@@ -185,13 +192,14 @@ class DNSReport(FPDF):
         self._kv("Resolveurs OK", f"{success}/{total}")
         self._kv("Consensus", f"{consensus_pct:.0f}%")
         self._kv("Valeur majoritaire", str(consensus)[:50])
-        self.ln(4)
+        self.ln(3)
         headers = ["Resolveur", "IP", "Resultat", "Statut"]
         rows = []
         for item in prop.get("details", []):
             status_icon = "OK" if item.get("ok") else "FAIL" if item.get("error") else "EMPTY"
-            rows.append([item.get("name", ""), item.get("ip", ""), item.get("result", "")[:40], status_icon])
-        self._table(headers, rows, [55, 35, 70, 25])
+            name = item.get("name", "").split()[0][:20]
+            rows.append([name, item.get("ip", ""), item.get("result", "")[:35], status_icon])
+        self._table(headers, rows, [45, 38, 75, 20])
 
     def email_security_page(self):
         email = self.results.get("email", {})
