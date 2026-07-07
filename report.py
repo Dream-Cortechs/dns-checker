@@ -560,6 +560,10 @@ def run_full_report(domain: str, ip: str = None) -> dict:
     try: results["whois"] = get_whois(domain, timeout=12)
     except: results["whois"] = None
     
+    # ─── Subdomains ─── (must be before GeoIP to enrich geo data)
+    try: results["subdomains"] = discover_subdomains(domain, bruteforce=True, crtsh=True, timeout=20)
+    except: pass
+    
     # GeoIP — root domain + all subdomain IPs
     try:
         geo_data = {"ips": [], "ip_map": {}}
@@ -594,10 +598,6 @@ def run_full_report(domain: str, ip: str = None) -> dict:
                                 entry.setdefault("subdomains", []).append(fqdn)
         
         results["geoip"] = geo_data
-    except: pass
-    
-    # ─── Subdomains ───
-    try: results["subdomains"] = discover_subdomains(domain, bruteforce=True, crtsh=True, timeout=20)
     except: pass
     
     # ─── Security Audit (DNSSEC + TLS + HTTP Headers + CAA) ───
