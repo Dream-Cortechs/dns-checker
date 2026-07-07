@@ -21,6 +21,8 @@ from dns_engine import (
 )
 from report import generate_report_pdf
 from whois_geo import get_whois, get_geoip, resolve_and_geo
+from subdomains import discover_subdomains
+from security import check_dnssec, check_caa, check_http_headers, scan_tls
 import plotly.graph_objects as go
 
 # ─── Geo ────────────────────────────────────────────────────────────────────
@@ -222,9 +224,9 @@ st.markdown("""
 
 # ─── HEADER ─────────────────────────────────────────────────────────────────
 
-col_logo, col_title = st.columns([0.07, 0.93])
+col_logo, col_title = st.columns([0.12, 0.88])
 with col_logo:
-    st.image("/opt/dns-checker/static/cortechs-logo.png", width=52)
+    st.image("/opt/dns-checker/static/cortechs-logo.png", width=60)
 with col_title:
     st.markdown("""
     <div style="padding-top:0.3rem;">
@@ -345,9 +347,9 @@ with st.sidebar:
 
 # ─── TABS ───────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🏠  Accueil", "🔍  DNS Lookup", "🌍  Propagation", "📧  Sécurité Email", "🚫  Blacklists",
-    "📋  WHOIS", "📍  Géo IP"
+    "📋  WHOIS", "📍  Géo IP", "🔎  Sous-domaines", "🛡️  Sécurité"
 ])
 
 
@@ -884,6 +886,156 @@ with tab7:
                             margin=dict(l=5,r=5,t=5,b=5), height=250, showlegend=False, dragmode=False
                         )
                         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 8: SUBDOMAIN DISCOVERY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab8:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Découverte de sous-domaines — brute-force DNS + Certificate Transparency (crt.sh)</div>', unsafe_allow_html=True)
+    
+    s_domain = st.text_input("Domaine racine", placeholder="cortechs.fr", key="sub_domain")
+    
+    col_s1, col_s2, col_s3 = st.columns([1.2, 1, 1])
+    with col_s1:
+        use_bf = st.checkbox("Brute-force DNS", value=True, key="sub_bf", help="Teste ~100 sous-domaines communs par DNS")
+    with col_s2:
+        use_ct = st.checkbox("Certificate Transparency (crt.sh)", value=True, key="sub_ct", help="Recherche dans les logs de certificats SSL/TLS")
+    with col_s3:
+        sub_btn = st.button("🔎 Découvrir", key="sub_btn", use_container_width=True)
+    
+    if sub_btn and s_domain:
+        with st.spinner(f"Recherche de sous-domaines pour **{s_domain}**..."):
+            r = discover_subdomains(s_domain.strip(), bruteforce=use_bf, crtsh=use_ct, timeout=25)
+        
+        if r.get("error"):
+            st.error(r["error"])
+        else:
+            st.success(f"**{r['count']}** sous-domaine(s) découvert(s)")
+            st.caption(f"Sources : {', '.join(r['sources'])}")
+            
+            if r["subdomains"]:
+                # Group by IP
+                by_ip = {}
+                for fqdn, ips in sorted(r["subdomains"].items()):
+                    ip_key = ", ".join(ips[:2])
+                    by_ip.setdefault(ip_key, []).append(fqdn)
+                
+                # Display as chips grouped by IP
+                st.markdown("### 📋 Résultats")
+                for ip_key, fqdns in sorted(by_ip.items()):
+                    st.markdown(f'<span style="color:#c9a94e;font-weight:700;font-size:0.8rem;">{ip_key}</span>', unsafe_allow_html=True)
+                    chips = ""
+                    for fqdn in sorted(fqdns):
+                        # Extract subdomain part
+                        sub = fqdn.replace("." + s_domain.strip(), "")
+                        chips += f'<span style="display:inline-block;background:#0d1a2d;border:1px solid #152540;border-radius:6px;padding:3px 10px;margin:2px;font-size:0.78rem;color:#e2e8f0;">{sub}</span>'
+                    st.markdown(f'<div style="margin-bottom:8px;">{chips}</div>', unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 9: SECURITY AUDIT (DNSSEC + TLS + HTTP Headers + CAA)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab9:
+    st.markdown('<div style="color:#94a3b8;font-size:0.82rem;">Audit de sécurité — DNSSEC · TLS · HTTP Headers · CAA</div>', unsafe_allow_html=True)
+    
+    s_domain = st.text_input("Domaine", placeholder="cortechs.fr", key="sec_domain")
+    
+    # Load subdomains from session if available (from tab8 scan)
+    known_subs = []
+    if st.session_state.get("results_subdomains") and st.session_state.active_domain == s_domain:
+        known_subs = list(st.session_state.results_subdomains.get("subdomains", {}).keys())
+    
+    if st.button("🛡️ Lancer l'audit de sécurité", key="sec_btn", use_container_width=True):
+        if s_domain:
+            with st.spinner(f"Audit de sécurité pour **{s_domain}**..."):
+                dnssec = check_dnssec(s_domain.strip())
+                caa = check_caa(s_domain.strip())
+                headers = check_http_headers(f"https://{s_domain.strip()}")
+                
+                # TLS scan — use known subdomains if available, otherwise just root
+                subs_to_scan = known_subs[:20] if known_subs else [s_domain.strip()]
+                tls = scan_tls(s_domain.strip(), subs_to_scan)
+            
+            # ─── Scores ───
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                c = "g" if dnssec["signed"] else "y"
+                st.markdown(f'<div class="kpi"><div class="num {c}">{"ON" if dnssec["signed"] else "OFF"}</div><div class="lbl">DNSSEC</div></div>', unsafe_allow_html=True)
+            with col2:
+                c = "g" if caa["has_caa"] else "y"
+                st.markdown(f'<div class="kpi"><div class="num {c}">{"ON" if caa["has_caa"] else "OFF"}</div><div class="lbl">CAA</div></div>', unsafe_allow_html=True)
+            with col3:
+                hs = headers.get("score", 0); hm = headers.get("max_score", 6)
+                c = "g" if hs >= 5 else "y" if hs >= 3 else "r"
+                st.markdown(f'<div class="kpi"><div class="num {c}">{hs}/{hm}</div><div class="lbl">HTTP Headers</div></div>', unsafe_allow_html=True)
+            with col4:
+                ts = tls["summary"]
+                total = ts["total_tls_hosts"]
+                ok = ts["ok"]
+                c = "g" if ok == total else "r" if ts["expired"] else "y"
+                st.markdown(f'<div class="kpi"><div class="num {c}">{ok}/{total}</div><div class="lbl">TLS OK</div></div>', unsafe_allow_html=True)
+            
+            # ─── DNSSEC ───
+            st.markdown("### 🔐 DNSSEC")
+            for d in dnssec["details"]:
+                icon = "✅" if "active" in d.lower() or "RRSIG" in d else "⚠️" if "non configure" in d.lower() else "ℹ️"
+                st.markdown(f'<div style="color:#e2e8f0;font-size:0.85rem;padding:2px 0;">{icon} {d}</div>', unsafe_allow_html=True)
+            
+            # ─── CAA ───
+            st.markdown("### 🔏 CAA (Certificate Authority Authorization)")
+            for a in caa["analysis"]:
+                icon = "✅" if "configure" in a.lower() else "⚠️"
+                st.markdown(f'<div style="color:#e2e8f0;font-size:0.85rem;padding:2px 0;">{icon} {a}</div>', unsafe_allow_html=True)
+            
+            # ─── HTTP Headers ───
+            st.markdown("### 🌐 HTTP Security Headers")
+            for check_name, check_data in headers.get("checks", {}).items():
+                ok = check_data["ok"]
+                color = "#4ade80" if ok else "#f87171"
+                icon = "✅" if ok else "❌"
+                detail = check_data["detail"]
+                st.markdown(f'<div style="background:#0d1a2d;border:1px solid #152540;border-left:3px solid {color};border-radius:8px;padding:0.5rem 1rem;margin-bottom:4px;"><span style="color:#e2e8f0;font-weight:600;font-size:0.85rem;">{icon} {check_name}</span><br><span style="color:#94a3b8;font-size:0.78rem;">{detail}</span></div>', unsafe_allow_html=True)
+            
+            # ─── TLS Certificates ───
+            st.markdown("### 🔒 Certificats TLS")
+            if tls["flags"]:
+                for flag in tls["flags"]:
+                    icon = "🔴" if "CRITIQUE" in flag else "🟠" if "URGENT" in flag else "🟡"
+                    st.warning(f"{icon} {flag}")
+            
+            if tls["certificates"]:
+                for host, cert in sorted(tls["certificates"].items()):
+                    days = cert.get("days_left", "?")
+                    if days is not None and days <= 0:
+                        color = "#f87171"; icon = "🔴"
+                    elif days is not None and days <= 30:
+                        color = "#f59e0b"; icon = "🟠"
+                    elif days is not None and days <= 90:
+                        color = "#facc15"; icon = "🟡"
+                    else:
+                        color = "#4ade80"; icon = "🟢"
+                    
+                    issuer = cert.get("issuer", "N/A")
+                    days_str = f"{days}j" if isinstance(days, int) else str(days)
+                    
+                    st.markdown(f"""
+                    <div style="background:#0d1a2d;border:1px solid #152540;border-radius:10px;padding:0.7rem 1rem;margin-bottom:5px;display:flex;align-items:center;gap:0.8rem;">
+                        <span style="font-size:1.2rem;">{icon}</span>
+                        <div style="flex:1;">
+                            <span style="color:#e2e8f0;font-weight:600;">{host}</span>
+                            <span style="color:#94a3b8;font-size:0.75rem;margin-left:8px;">{issuer}</span>
+                        </div>
+                        <span style="color:{color};font-weight:700;font-size:0.85rem;white-space:nowrap;">{days_str}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            if tls["errors"]:
+                with st.expander(f"⚠️ {len(tls['errors'])} hôte(s) sans HTTPS"):
+                    for e in tls["errors"]:
+                        st.markdown(f'- **{e["host"]}**: {e["error"]}')
 
 
 # ─── FOOTER ──────────────────────────────────────────────────────────────────
