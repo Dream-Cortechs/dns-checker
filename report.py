@@ -144,7 +144,7 @@ class DNSReport(FPDF):
         self.set_font(self.font_name, "", 9)
         self.cell(0, 5, datetime.now().strftime("Genere le %d/%m/%Y a %H:%M"), align="C",
                   new_x="LMARGIN", new_y="NEXT")
-        self.ln(10)
+        self.ln(20)
         # Summary grid — 2 columns
         secs = []
         p = self.results.get("propagation", {})
