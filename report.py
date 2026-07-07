@@ -125,7 +125,14 @@ class DNSReport(FPDF):
         self.set_text_color(180, 190, 210)
         self.set_font(self.font_name, "", 12)
         self.cell(0, 7, "Rapport de diagnostic DNS complet", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.ln(10)
+        self.ln(6)
+        # Logo Cortechs
+        logo_path = "/opt/dns-checker/static/cortechs-logo.png"
+        try:
+            self.image(logo_path, x=85, y=self.get_y(), w=40)
+            self.ln(18)
+        except:
+            self.ln(4)
         self.set_text_color(*GOLD)
         self.set_font(self.font_name, "B", 18)
         self.cell(0, 8, self.domain, align="C", new_x="LMARGIN", new_y="NEXT")
