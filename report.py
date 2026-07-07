@@ -145,7 +145,6 @@ class DNSReport(FPDF):
         self.set_font(self.font_name, "", 9)
         now = datetime.now().strftime("%d/%m/%Y  %H:%M")
         self.cell(0, 5, f"Genere le {now}", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.cell(0, 5, "Cortechs (c) 2026  |  dns-checker v3.0", align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(8)
         # Summary chips
         secs = []
