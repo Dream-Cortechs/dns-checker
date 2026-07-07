@@ -180,6 +180,105 @@ class DNSReport(FPDF):
         last_row = (len(secs) + 1) // 2
         self.set_y(y0 + last_row * 10 + 5)
 
+    def executive_summary_page(self):
+        """Page de resume executif avec tableau de statut."""
+        p = self.results.get("propagation", {})
+        e = self.results.get("email", {})
+        s = self.results.get("subdomains", {})
+        bl = self.results.get("blacklist", {})
+        w = self.results.get("whois", {})
+        
+        self.add_page()
+        self._hbar("Resume Executif")
+        self.ln(4)
+        
+        rows = []
+        
+        # DNS Resolution
+        rows.append(("Resolution DNS", "OK", "Tous les enregistrements trouves"))
+        
+        # Propagation
+        p_ok = p.get("success", 0); p_total = p.get("total", 24)
+        p_status = "OK" if p_ok >= p_total * 0.8 else "WARN" if p_ok >= p_total * 0.5 else "FAIL"
+        rows.append(("Propagation mondiale", p_status, f"{p_ok}/{p_total} resolveurs OK ({p.get('consensus_pct',0):.0f}%)"))
+        
+        # SPF
+        spf = e.get("spf", {})
+        spf_ok = spf.get("present", False)
+        rows.append(("SPF", "OK" if spf_ok else "FAIL",
+            "Hard Fail (-all)" if spf.get("mechanism") == "Hard Fail (-all)" else "Present" if spf_ok else "Absent"))
+        
+        # DKIM
+        dkim = e.get("dkim", {})
+        dkim_ok = dkim.get("present", False)
+        rows.append(("DKIM", "OK" if dkim_ok else "FAIL",
+            f"Present (selecteur: {dkim.get('selector','')})" if dkim_ok else "A mettre en place"))
+        
+        # DMARC
+        dmarc = e.get("dmarc", {})
+        dmarc_ok = dmarc.get("present", False)
+        dmarc_policy = dmarc.get("policy", "")
+        rows.append(("DMARC", "OK" if dmarc_ok and ("reject" in dmarc_policy.lower() or "quarantine" in dmarc_policy.lower()) else "WARN" if dmarc_ok else "FAIL",
+            dmarc_policy if dmarc_ok else "Absent"))
+        
+        # Blacklists
+        bl_listed = bl.get("listed", 0); bl_total = bl.get("total", 12)
+        rows.append(("Blacklists", "OK" if bl_listed == 0 else "FAIL",
+            "Aucune" if bl_listed == 0 else f"{bl_listed}/{bl_total} listee(s)"))
+        
+        # Subdomains
+        sub_count = s.get("count", 0)
+        rows.append(("Sous-domaines", "WARN" if sub_count > 10 else "OK",
+            f"{sub_count} exposes" if sub_count > 10 else f"{sub_count} trouves"))
+        
+        # Expiration
+        exp_date = w.get("expiration_date", "")
+        days_left = ""
+        if exp_date:
+            try:
+                exp = datetime.strptime(exp_date[:10], "%Y-%m-%d")
+                delta = (exp - datetime.now()).days
+                days_left = f"Expire le {exp.strftime('%d/%m/%Y')} ({delta} jours)"
+            except: days_left = f"Expire le {exp_date[:10]}"
+        rows.append(("Expiration domaine", "WARN" if "30" in days_left or "60" in days_left else "OK" if days_left else "",
+            days_left or "Inconnue"))
+        
+        # Draw table
+        headers = ["Element", "Statut", "Commentaire"]
+        col_widths = [55, 25, 100]
+        
+        self.set_fill_color(30, 40, 60)
+        self.set_text_color(*GOLD)
+        self.set_font(self.font_name, "B", 9)
+        for i, h in enumerate(headers):
+            self.cell(col_widths[i], 7, h, fill=True)
+        self.ln()
+        
+        status_colors = {"OK": GREEN, "WARN": YELLOW, "FAIL": RED, "": GRAY_TEXT}
+        status_labels = {"OK": "OK", "WARN": "AUDITER", "FAIL": "CORRIGER", "": "-"}
+        
+        for i, (element, status, comment) in enumerate(rows):
+            self.set_fill_color(*LIGHT_ROW) if i % 2 == 0 else self.set_fill_color(*WHITE_ROW)
+            # Element
+            self.set_font(self.font_name, "B", 8)
+            self.set_text_color(*DARK_TEXT)
+            self.cell(col_widths[0], 6.5, element, fill=True)
+            # Status
+            self.set_font(self.font_name, "B", 8)
+            self.set_text_color(*status_colors.get(status, GRAY_TEXT))
+            self.cell(col_widths[1], 6.5, status_labels.get(status, status), fill=True)
+            # Comment
+            self.set_font(self.font_name, "", 7.5)
+            self.set_text_color(*DARK_TEXT)
+            self.cell(col_widths[2], 6.5, comment, fill=True)
+            self.ln()
+        
+        self.ln(6)
+        # Legend
+        self.set_font(self.font_name, "", 7)
+        self.set_text_color(*GRAY_TEXT)
+        self.cell(0, 4, "Legende:  OK = Bon   AUDITER = A verifier   CORRIGER = Action requise", new_x="LMARGIN", new_y="NEXT")
+
     def dns_lookup_page(self):
         lookup = self.results.get("lookup", {})
         self.add_page()
@@ -329,6 +428,7 @@ class DNSReport(FPDF):
 
     def build(self) -> bytes:
         self.cover_page()
+        self.executive_summary_page()
         if self.results.get("lookup"): self.dns_lookup_page()
         if self.results.get("propagation"): self.propagation_page()
         if self.results.get("email"): self.email_security_page()
