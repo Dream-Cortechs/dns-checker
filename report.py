@@ -369,24 +369,24 @@ class DNSReport(FPDF):
                 self._kv(label, str(value)[:90])
 
     def geoip_page(self):
-        geoip = self.results.get("geoip", {})
-        if not geoip: return
+        geoip = self.results.get("geoip") or {}
+        if not geoip or not geoip.get("ips"): return
         self.add_page()
-        self._hbar("Geolocalisation IP")
+        ips = geoip.get("ips", [])
+        self._hbar(f"Geolocalisation IP ({len(ips)} IP(s) localisees)")
         self.ln(2)
-        for entry in geoip.get("ips", []):
+        
+        headers = ["IP", "Localisation", "ISP", "Sous-domaines"]
+        rows = []
+        for entry in ips:
             ip = entry.get("ip", "")
             g = entry.get("geo", {})
-            self.set_font(self.font_name, "B", 11)
-            self.set_text_color(*GOLD)
-            self.cell(0, 7, ip, new_x="LMARGIN", new_y="NEXT")
-            self.set_font(self.font_name, "", 9)
-            self.set_text_color(*DARK_TEXT)
-            loc = f"{g.get('city','')}, {g.get('region','')}, {g.get('country','')}".strip(", ")
-            if loc: self.cell(0, 5, f"  {loc}", new_x="LMARGIN", new_y="NEXT")
-            if g.get("isp"): self.cell(0, 5, f"  ISP: {g['isp']}", new_x="LMARGIN", new_y="NEXT")
-            if g.get("org"): self.cell(0, 5, f"  Org: {g['org']}", new_x="LMARGIN", new_y="NEXT")
-            self.ln(4)
+            loc = f"{g.get('city','')}, {g.get('country','')}".strip(", ")
+            isp = (g.get("isp") or "")[:30]
+            subs = ", ".join((entry.get("subdomains") or [])[:5])
+            rows.append([ip, loc, isp, subs[:60]])
+        
+        self._table(headers, rows, [35, 45, 40, 60])
 
     def subdomains_page(self):
         subs = self.results.get("subdomains") or {}
@@ -560,10 +560,40 @@ def run_full_report(domain: str, ip: str = None) -> dict:
     try: results["whois"] = get_whois(domain, timeout=12)
     except: results["whois"] = None
     
-    # GeoIP
+    # GeoIP — root domain + all subdomain IPs
     try:
-        geo_ip = ip or (lookup.get("a", [None])[0] if lookup.get("a") else None)
-        if geo_ip: results["geoip"] = resolve_and_geo(geo_ip)
+        geo_data = {"ips": [], "ip_map": {}}
+        seen_ips = set()
+        
+        # Root domain IP
+        root_ip = ip or (lookup.get("a", [None])[0] if lookup.get("a") else None)
+        if root_ip and root_ip not in seen_ips:
+            seen_ips.add(root_ip)
+            g = resolve_and_geo(root_ip)
+            for entry in g.get("ips", []):
+                entry["subdomains"] = [domain]
+                geo_data["ips"].append(entry)
+                geo_data["ip_map"][entry["ip"]] = [domain]
+        
+        # Subdomain IPs
+        if results.get("subdomains"):
+            sd = results["subdomains"].get("subdomains", {})
+            for fqdn, ips in sd.items():
+                for ip_addr in ips:
+                    if ip_addr not in seen_ips:
+                        seen_ips.add(ip_addr)
+                        g = resolve_and_geo(ip_addr)
+                        for entry in g.get("ips", []):
+                            entry["subdomains"] = [fqdn]
+                            geo_data["ips"].append(entry)
+                            geo_data["ip_map"].setdefault(entry["ip"], []).append(fqdn)
+                    else:
+                        # IP already seen, just add subdomain reference
+                        for entry in geo_data["ips"]:
+                            if entry["ip"] == ip_addr:
+                                entry.setdefault("subdomains", []).append(fqdn)
+        
+        results["geoip"] = geo_data
     except: pass
     
     # ─── Subdomains ───
