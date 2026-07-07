@@ -314,7 +314,7 @@ class DNSReport(FPDF):
         self.set_y(-15)
         self.set_font(self.font_name, "", 7)
         self.set_text_color(*GRAY_TEXT)
-        self.cell(0, 5, f"DNS CHECKER v3.0  |  Cortechs (c) 2026  |  {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Page {self.page_no()}/{{nb}}", align="C")
+        self.cell(0, 5, f"DNS CHECKER v3.0  |  {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Page {self.page_no()}/{{nb}}", align="C")
 
     def build(self) -> bytes:
         self.cover_page()
@@ -390,7 +390,9 @@ def run_full_report(domain: str, ip: str = None) -> dict:
         for name, zone in DNS_BLACKLISTS.items():
             try:
                 r = dnsr.Resolver(); r.timeout = 3; r.lifetime = 3
-                listed += 1; bl_details.append({"name": name, "status": "LISTEE", "response": str(r.resolve(f"{reversed_ip}.{zone}", "A")[0])})
+                ans = r.resolve(f"{reversed_ip}.{zone}", "A")
+                listed += 1
+                bl_details.append({"name": name, "status": "LISTEE", "response": str(ans[0])})
             except dnsr.NXDOMAIN: bl_details.append({"name": name, "status": "Clean", "response": "NXDOMAIN"})
             except: bl_details.append({"name": name, "status": "Inconnu", "response": "Timeout/Erreur"})
         results["blacklist"] = {"ip": ip, "listed": listed, "total": len(DNS_BLACKLISTS),
