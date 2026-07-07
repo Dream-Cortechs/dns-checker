@@ -224,9 +224,9 @@ st.markdown("""
 
 # ─── HEADER ─────────────────────────────────────────────────────────────────
 
-col_logo, col_title = st.columns([0.12, 0.88])
+col_logo, col_title = st.columns([0.18, 0.82])
 with col_logo:
-    st.image("/opt/dns-checker/static/cortechs-logo.png", width=60)
+    st.image("/opt/dns-checker/static/cortechs.svg", width=150)
 with col_title:
     st.markdown("""
     <div style="padding-top:0.3rem;">
