@@ -139,9 +139,6 @@ class DNSReport(FPDF):
         except:
             self.ln(5)
         self.set_y(max(self.get_y(), 68))
-        self.set_text_color(*GOLD)
-        self.set_font(self.font_name, "B", 17)
-        self.cell(0, 9, self.domain, align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(6)
         self.set_text_color(*GRAY_TEXT)
         self.set_font(self.font_name, "", 9)
