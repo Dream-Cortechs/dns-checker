@@ -51,6 +51,13 @@ class Job:
     def running(self, label: str, detail: str = "") -> None:
         self.step(label, detail, status="running")
 
+    def acquitter(self) -> None:
+        """Clôt les étapes encore marquées « en cours »."""
+        with _lock:
+            for etape in self.steps:
+                if etape["status"] == "running":
+                    etape["status"] = "ok"
+
     # -- sérialisation -----------------------------------------------------
     def to_dict(self, with_result: bool = False) -> Dict[str, Any]:
         data = {
@@ -81,6 +88,10 @@ def submit(kind: str, fn: Callable[[Job], Any], label: str = "") -> Job:
         try:
             job.result = fn(job)
             job.status = "done"
+            # Une tâche terminée ne peut pas laisser une étape « en cours » :
+            # le dernier job.running() sans step() final affichait sinon un point
+            # bleu « … » alors que tout était fini.
+            job.acquitter()
         except Exception as exc:  # on garde la trace pour le diagnostic
             job.error = "%s : %s" % (type(exc).__name__, exc)
             job.status = "error"
