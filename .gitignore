@@ -7,3 +7,10 @@ dist/
 *.exe
 .venv/
 venv/
+
+# v2
+.venv/
+venv/
+node_modules/
+web2/frontend/dist/
+.pytest_cache/

@@ -1,0 +1,9 @@
+# Stack v2 Cortechs — DNS Checker
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+dnspython>=2.6
+fpdf2>=2.7.9
+# tests
+pytest>=8.0
+httpx>=0.27

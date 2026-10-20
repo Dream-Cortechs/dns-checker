@@ -1,0 +1,20 @@
+[Unit]
+Description=DNS Checker v2 (FastAPI + React) — Cortechs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dns-checker-v2
+Environment=DNS_DATA_DIR=/var/lib/dns-checker-v2
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/dns-checker-v2/.venv/bin/uvicorn web2.backend.main:app --host 0.0.0.0 --port 8507 --workers 1
+Restart=always
+RestartSec=5
+# Les scans lancent des dizaines de connexions DNS sortantes : on laisse le
+# système respirer plutôt que de tuer le service au premier pic.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
